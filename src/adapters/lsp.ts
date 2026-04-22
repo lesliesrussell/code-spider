@@ -43,6 +43,8 @@ interface ResolvedLspCandidate {
   analyzer: RegistryAnalyzer
 }
 
+type LspRange = LspSymbol['range']
+
 const LSP_SYMBOL_KIND_NAMES: Record<number, string> = {
   1: 'File', 2: 'Module', 3: 'Namespace', 4: 'Package', 5: 'Class',
   6: 'Method', 7: 'Property', 8: 'Field', 9: 'Constructor', 10: 'Enum',
@@ -69,8 +71,76 @@ function uriToPath(uri: string): string {
   return uri.startsWith('file://') ? uri.slice('file://'.length) : uri
 }
 
+function isPosition(value: unknown): value is { line: number; character: number } {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate['line'] === 'number' && typeof candidate['character'] === 'number'
+}
+
+function isRange(value: unknown): value is LspRange {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return isPosition(candidate['start']) && isPosition(candidate['end'])
+}
+
+function defaultRange(): LspRange {
+  return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+}
+
+function extractSymbolRange(raw: Record<string, unknown>): LspRange {
+  if (isRange(raw['range'])) return raw['range']
+
+  const location = raw['location']
+  if (typeof location === 'object' && location !== null) {
+    const locationRange = (location as Record<string, unknown>)['range']
+    if (isRange(locationRange)) return locationRange
+  }
+
+  return defaultRange()
+}
+
+function extractSelectionRange(raw: Record<string, unknown>): LspRange | undefined {
+  return isRange(raw['selectionRange']) ? raw['selectionRange'] : undefined
+}
+
+export function normalizeDocumentSymbolResult(result: unknown): LspSymbol[] {
+  if (!Array.isArray(result)) return []
+
+  const symbols: LspSymbol[] = []
+
+  const visit = (entry: unknown, containerName?: string): void => {
+    if (typeof entry !== 'object' || entry === null) return
+
+    const raw = entry as Record<string, unknown>
+    const name = typeof raw['name'] === 'string' ? raw['name'] : ''
+    const kind = typeof raw['kind'] === 'number' ? raw['kind'] : 13
+    const range = extractSymbolRange(raw)
+    symbols.push({
+      name,
+      kind,
+      kindName: LSP_SYMBOL_KIND_NAMES[kind] ?? 'Variable',
+      containerName: typeof raw['containerName'] === 'string' ? raw['containerName'] : containerName,
+      range,
+      selectionRange: extractSelectionRange(raw),
+    })
+
+    const children = raw['children']
+    if (Array.isArray(children)) {
+      for (const child of children) visit(child, name)
+    }
+  }
+
+  for (const entry of result) visit(entry)
+  return symbols
+}
+
 // Attempt real LSP communication via stdio JSON-RPC
-async function tryRealLspDocumentSymbols(filePath: string, command: string[], languageId: string): Promise<LspSymbol[] | null> {
+async function tryRealLspDocumentSymbols(
+  filePath: string,
+  command: string[],
+  languageId: string,
+  repoRoot: string,
+): Promise<LspSymbol[] | null> {
   return new Promise((resolve) => {
     const [bin, ...args] = command
     if (bin === undefined) { resolve(null); return }
@@ -126,7 +196,7 @@ async function tryRealLspDocumentSymbols(filePath: string, command: string[], la
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
-          // textDocument/didOpen then documentSymbol
+          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
           send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
             textDocument: { uri, languageId, version: 1, text }
           }})
@@ -135,22 +205,7 @@ async function tryRealLspDocumentSymbols(filePath: string, command: string[], la
             textDocument: { uri }
           }})
         } else if (docSymbolsRequested && msg.id === 2) {
-          const result = msg.result
-          if (Array.isArray(result)) {
-            for (const sym of result) {
-              const raw = sym as Record<string, unknown>
-              const name = typeof raw['name'] === 'string' ? raw['name'] : ''
-              const kind = typeof raw['kind'] === 'number' ? raw['kind'] : 13
-              symbols.push({
-                name,
-                kind,
-                kindName: LSP_SYMBOL_KIND_NAMES[kind] ?? 'Variable',
-                containerName: typeof raw['containerName'] === 'string' ? raw['containerName'] : undefined,
-                range: (raw['range'] as LspSymbol['range']) ?? { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-                selectionRange: raw['selectionRange'] as LspSymbol['selectionRange'],
-              })
-            }
-          }
+          symbols.push(...normalizeDocumentSymbolResult(msg.result))
           send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
           send({ jsonrpc: '2.0', method: 'exit', params: null })
           clearTimeout(timer)
@@ -168,7 +223,7 @@ async function tryRealLspDocumentSymbols(filePath: string, command: string[], la
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: {
         processId: process.pid,
-        rootUri: fileUri(filePath.replace(/\/[^/]+$/, '')),
+        rootUri: fileUri(repoRoot),
         capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: false } } },
         initializationOptions: {},
       }
@@ -181,6 +236,7 @@ async function tryRealLspReferences(
   command: string[],
   languageId: string,
   position: { line: number; character: number },
+  repoRoot: string,
 ): Promise<LspLocation[] | null> {
   return new Promise((resolve) => {
     const [bin, ...args] = command
@@ -236,6 +292,7 @@ async function tryRealLspReferences(
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
+          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
           send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
             textDocument: { uri, languageId, version: 1, text }
           }})
@@ -270,7 +327,7 @@ async function tryRealLspReferences(
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: {
         processId: process.pid,
-        rootUri: fileUri(filePath.replace(/\/[^/]+$/, '')),
+        rootUri: fileUri(repoRoot),
         capabilities: { textDocument: { references: { dynamicRegistration: false } } },
         initializationOptions: {},
       }
@@ -278,7 +335,12 @@ async function tryRealLspReferences(
   })
 }
 
-async function tryRealLspDiagnostics(filePath: string, command: string[], languageId: string): Promise<LspDiagnostic[] | null> {
+async function tryRealLspDiagnostics(
+  filePath: string,
+  command: string[],
+  languageId: string,
+  repoRoot: string,
+): Promise<LspDiagnostic[] | null> {
   return new Promise((resolve) => {
     const [bin, ...args] = command
     if (bin === undefined) { resolve(null); return }
@@ -347,6 +409,7 @@ async function tryRealLspDiagnostics(filePath: string, command: string[], langua
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
+          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
           send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
             textDocument: { uri, languageId, version: 1, text }
           }})
@@ -383,7 +446,7 @@ async function tryRealLspDiagnostics(filePath: string, command: string[], langua
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: {
         processId: process.pid,
-        rootUri: fileUri(filePath.replace(/\/[^/]+$/, '')),
+        rootUri: fileUri(repoRoot),
         capabilities: { textDocument: { publishDiagnostics: {} } },
         initializationOptions: {},
       }
@@ -471,7 +534,7 @@ export class LspAdapter {
 
     if (selectedCommand !== undefined) {
       try {
-        const realSymbols = await tryRealLspDocumentSymbols(filePath, selectedCommand, langLower)
+        const realSymbols = await tryRealLspDocumentSymbols(filePath, selectedCommand, langLower, repoRoot)
         if (realSymbols !== null && realSymbols.length > 0) {
           return { filePath, symbols: realSymbols, diagnostics: [] }
         }
@@ -505,7 +568,7 @@ export class LspAdapter {
     }
 
     try {
-      const locations = await tryRealLspReferences(filePath, selectedCommand, langLower, position)
+      const locations = await tryRealLspReferences(filePath, selectedCommand, langLower, position, repoRoot)
       if (locations !== null) {
         return {
           locations: locations.map(location => ({
@@ -538,7 +601,7 @@ export class LspAdapter {
     }
 
     try {
-      const diagnostics = await tryRealLspDiagnostics(filePath, selectedCommand, langLower)
+      const diagnostics = await tryRealLspDiagnostics(filePath, selectedCommand, langLower, repoRoot)
       if (diagnostics !== null) {
         return { diagnostics }
       }

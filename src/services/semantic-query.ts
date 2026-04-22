@@ -85,12 +85,8 @@ function isHeuristic(metadataJson: string | null): boolean {
   }
 }
 
-export class SemanticQueryService {
-  constructor(private readonly db: Database, private readonly runId: number) {}
-
-  findDefinitions(symbolQuery: string): DefinitionMatch[] {
-    const rows = this.db.query<DefinitionRow, [number, string]>(
-      `SELECT
+function definitionQuerySql(caseSensitive: boolean): string {
+  return `SELECT
          s.id AS symbol_id,
          s.node_id,
          n.key AS node_key,
@@ -106,13 +102,41 @@ export class SemanticQueryService {
        FROM symbols s
        JOIN nodes n ON n.id = s.node_id
        WHERE s.run_id = ?
-         AND LOWER(s.name) = LOWER(?)
+         AND ${caseSensitive ? 's.name = ?' : 'LOWER(s.name) = LOWER(?)'}
       ORDER BY
         CASE WHEN s.metadata_json LIKE '%"mode":"heuristic"%' THEN 1 ELSE 0 END,
         n.path ASC,
          s.name ASC`
+}
+
+export class SemanticQueryService {
+  constructor(private readonly db: Database, private readonly runId: number) {}
+
+  findDefinitions(symbolQuery: string): DefinitionMatch[] {
+    const rows = this.db.query<DefinitionRow, [number, string]>(
+      definitionQuerySql(false)
     ).all(this.runId, symbolQuery)
 
+    return this.mapDefinitionRows(rows)
+  }
+
+  findReferenceSeedDefinitions(symbolQuery: string): DefinitionMatch[] {
+    const exactRows = this.db.query<DefinitionRow, [number, string]>(
+      definitionQuerySql(true)
+    ).all(this.runId, symbolQuery)
+
+    if (exactRows.length > 0) {
+      return this.mapDefinitionRows(exactRows)
+    }
+
+    const fallbackRows = this.db.query<DefinitionRow, [number, string]>(
+      definitionQuerySql(false)
+    ).all(this.runId, symbolQuery)
+
+    return this.mapDefinitionRows(fallbackRows)
+  }
+
+  private mapDefinitionRows(rows: DefinitionRow[]): DefinitionMatch[] {
     return rows.map(row => {
       const range = parseRange(row.range_json)
       const selectionRange = parseRange(row.selection_range_json)

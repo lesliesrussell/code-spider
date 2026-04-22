@@ -138,6 +138,46 @@ describe('SemanticQueryService definitions', () => {
     expect(matches[1]?.heuristic).toBe(true)
   })
 
+  test('uses exact-case definitions first for refs seed selection', () => {
+    const dbPath = makeTempDbPath('code-spider-ref-seeds')
+    const db = openDb(dbPath)
+
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-21T12:00:00Z', '2026-04-21T12:01:00Z', '/tmp/repo', 'abc1234', 'test')
+
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES
+         (1, 1, 'unit', 'unit:src/lsp.ts', 'lsp.ts', 'src/lsp.ts', 'typescript', 0, 1),
+         (2, 1, 'unit', 'unit:src/runner.ts', 'runner.ts', 'src/runner.ts', 'typescript', 0, 1)`
+    ).run()
+
+    db.query(
+      `INSERT INTO symbols (
+         id, run_id, node_id, symbol_key, name, kind, container_name, signature, range_json, selection_range_json, metadata_json
+       ) VALUES
+         (1, 1, 1, 'src/lsp.ts:LspAdapter', 'LspAdapter', 'Class', null, null, ?, ?, null),
+         (2, 1, 2, 'src/runner.ts:lspAdapter', 'lspAdapter', 'Property', 'Runner', null, ?, ?, null)`
+    ).run(
+      JSON.stringify({ start: { line: 10, character: 0 }, end: { line: 30, character: 1 } }),
+      JSON.stringify({ start: { line: 10, character: 13 }, end: { line: 10, character: 23 } }),
+      JSON.stringify({ start: { line: 4, character: 2 }, end: { line: 4, character: 40 } }),
+      JSON.stringify({ start: { line: 4, character: 2 }, end: { line: 4, character: 12 } }),
+    )
+
+    const defs = new SemanticQueryService(db, 1).findDefinitions('LspAdapter')
+    const refSeeds = new SemanticQueryService(db, 1).findReferenceSeedDefinitions('LspAdapter')
+
+    expect(defs).toHaveLength(2)
+    expect(refSeeds).toHaveLength(1)
+    expect(refSeeds[0]).toMatchObject({
+      path: 'src/lsp.ts',
+      name: 'LspAdapter',
+      kind: 'Class',
+    })
+  })
+
   test('returns indexed symbol locations as a fallback reference set', () => {
     const dbPath = makeTempDbPath('code-spider-indexed-refs')
     const db = openDb(dbPath)

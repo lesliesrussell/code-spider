@@ -5,6 +5,22 @@ import { SemanticQueryService } from '../services/semantic-query'
 import { AnalyzerRunner } from '../services/analyzer-runner'
 import { resolve, relative } from 'node:path'
 
+interface ReferenceOutput {
+  symbol: string
+  mode: 'lsp-references' | 'indexed-symbols'
+  definitions: ReturnType<SemanticQueryService['findReferenceSeedDefinitions']>
+  references: Array<{
+    path: string
+    line: number | null
+    column: number | null
+    endLine: number | null
+    endColumn: number | null
+  }>
+  errors: string[]
+  degraded: boolean
+  degradationReason?: string
+}
+
 export default async function run(ctx: CliContext): Promise<void> {
   const symbol = ctx.args[0]
   if (!symbol) {
@@ -20,16 +36,20 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   const query = new SemanticQueryService(db, runId)
-  const definitions = query.findDefinitions(symbol)
+  const definitions = query.findReferenceSeedDefinitions(symbol)
   if (definitions.length === 0) {
     const indexedMatches = query.findIndexedReferences(symbol)
+    const response: ReferenceOutput = {
+      symbol,
+      mode: 'indexed-symbols',
+      definitions: [],
+      references: indexedMatches,
+      errors: [],
+      degraded: true,
+      degradationReason: `No definitions found for ${symbol}`,
+    }
     if (ctx.json) {
-      console.log(JSON.stringify({
-        symbol,
-        mode: 'indexed-symbols',
-        references: indexedMatches,
-        error: `No definitions found for ${symbol}`,
-      }, null, 2))
+      console.log(JSON.stringify(response, null, 2))
       return
     }
     console.log(`No definitions found for ${symbol}`)
@@ -87,15 +107,24 @@ export default async function run(ctx: CliContext): Promise<void> {
   )
   const fallbackReferences = deduped.length > 0 ? deduped : query.findIndexedReferences(symbol)
   const mode = deduped.length > 0 ? 'lsp-references' : 'indexed-symbols'
+  const degraded = mode !== 'lsp-references'
+  const degradationReason = degraded
+    ? errors.length > 0
+      ? `Fell back to indexed symbol matches after LSP references returned no locations (${errors.join('; ')})`
+      : 'Fell back to indexed symbol matches because LSP references returned no locations'
+    : undefined
+  const response: ReferenceOutput = {
+    symbol,
+    mode,
+    definitions,
+    references: fallbackReferences,
+    errors,
+    degraded,
+    degradationReason,
+  }
 
   if (ctx.json) {
-    console.log(JSON.stringify({
-      symbol,
-      mode,
-      definitions,
-      references: fallbackReferences,
-      errors,
-    }, null, 2))
+    console.log(JSON.stringify(response, null, 2))
     return
   }
 
@@ -108,7 +137,12 @@ export default async function run(ctx: CliContext): Promise<void> {
     return
   }
 
-  console.log(`References for ${symbol}`)
+  if (degraded) {
+    console.log(`Fallback references for ${symbol}`)
+    console.log(`  ${degradationReason}`)
+  } else {
+    console.log(`References for ${symbol}`)
+  }
   console.log()
   for (const reference of fallbackReferences) {
     const line = reference.line !== null ? reference.line + 1 : '?'
