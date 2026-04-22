@@ -232,6 +232,7 @@ describe('Exporter freshness metadata', () => {
     expect(output).toContain('no flow edges detected; use fallback queries for behavioral tracing:')
     expect(output).toContain('code-spider refs ExampleService')
     expect(output).toContain('code-spider refs execute')
+    expect(output).not.toContain('callback')
   })
 
   test('adds a compiler phase-boundary line when multiple artifact stages are detected', async () => {
@@ -274,6 +275,43 @@ describe('Exporter freshness metadata', () => {
     expect(jsonPayload.phaseBoundary).toEqual({
       artifacts: ['token stream', 'AST nodes', 'IR program', 'bytecode'],
     })
+  })
+
+  test('does not infer compiler phase boundaries from unrelated files elsewhere in the repo', async () => {
+    const repoRoot = makeTempRepo('code-spider-exporter-phase-scope')
+    mkdirSync(join(repoRoot, 'src'), { recursive: true })
+    writeFileSync(join(repoRoot, 'src', 'ui.ts'), 'export const button = 1\n')
+    initGitRepo(repoRoot)
+    execSync('git add .', { cwd: repoRoot, stdio: 'ignore' })
+    execSync('git commit -m "init"', { cwd: repoRoot, stdio: 'ignore' })
+
+    const dbPath = makeTempDbPath('code-spider-exporter-phase-scope')
+    const db = openDb(dbPath)
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-22T10:00:00Z', '2026-04-22T10:02:00Z', repoRoot, 'abc1234', 'test')
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, summary, score, confidence)
+       VALUES
+         (1, 1, 'unit', 'unit:src/ui.ts', 'ui.ts', 'src/ui.ts', 'TypeScript', 'UI helper', 0.4, 1),
+         (2, 1, 'unit', 'unit:src/compiler.ts', 'compiler.ts', 'src/compiler.ts', 'TypeScript', 'Compiler internals', 0.7, 1)`
+    ).run()
+    db.query(
+      `INSERT INTO stats (run_id, node_id, metric, value) VALUES
+         (1, 1, 'loc', 12), (1, 1, 'churn', 1), (1, 1, 'recency', 2),
+         (1, 2, 'loc', 50), (1, 2, 'churn', 3), (1, 2, 'recency', 5)`
+    ).run()
+    db.query(
+      `INSERT INTO symbols (run_id, node_id, symbol_key, name, kind) VALUES
+         (1, 1, 'src/ui.ts:renderButton', 'renderButton', 'Function'),
+         (1, 2, 'src/compiler.ts:tokenize', 'tokenize', 'Function'),
+         (1, 2, 'src/compiler.ts:AstNode', 'AstNode', 'Class'),
+         (1, 2, 'src/compiler.ts:lowerToIr', 'lowerToIr', 'Function'),
+         (1, 2, 'src/compiler.ts:emitBytecode', 'emitBytecode', 'Function')`
+    ).run()
+
+    const output = await new Exporter(db, 1).exportNode('unit:src/ui.ts', 'md')
+    expect(output).not.toContain('## Phase Boundaries')
   })
 
   test('exports investigations with curated markdown, issue, and git context', async () => {

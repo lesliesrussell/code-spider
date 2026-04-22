@@ -61,6 +61,12 @@ export default async function run(ctx: CliContext): Promise<void> {
   console.log(`  run #${runId} · ${repoName} · ${commit}`)
   console.log()
 
+  if (node.summary) {
+    console.log('Summary')
+    console.log(`  ${node.summary}`)
+    console.log()
+  }
+
   console.log('Stats')
   const recencyStr = formatRecency(stats.recency)
   console.log(`  Files: ${String(children.length).padStart(4)}    LOC: ${String(stats.loc).padStart(6)}    Churn: ${String(stats.churn).padStart(4)}    Recency: ${recencyStr}`)
@@ -75,7 +81,7 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   if (gitContext.length > 0) {
-    console.log('History')
+    console.log(`Git Context (${gitContext.length})`)
     for (const item of gitContext) {
       const when = item.locator ? `  ${item.locator}` : ''
       const message = item.snippet ? `  → ${item.snippet}` : ''
@@ -95,7 +101,7 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   if (markdownContext.length > 0) {
-    console.log('Context')
+    console.log(`Docs Context (${markdownContext.length})`)
     for (const item of markdownContext) {
       const where = item.docPath ?? item.docLabel
       const heading = item.sectionTitle ? ` > ${item.sectionTitle}` : ''
@@ -106,7 +112,7 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   if (beadsContext.length > 0) {
-    console.log('Work')
+    console.log(`Tracked Issues (${beadsContext.length})`)
     for (const item of beadsContext) {
       const id = item.issueId ?? item.issueKey
       const status = item.status ? `  ${item.status}` : ''

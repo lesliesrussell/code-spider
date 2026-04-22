@@ -7,7 +7,9 @@ export interface RelatedResult {
   label: string
   path: string | null
   score: number
+  recency: number | null
   reasons: string[]
+  signals: string[]
 }
 
 interface SymbolOverlapRow {
@@ -60,6 +62,15 @@ function zoneFromPath(path: string | null): string | null {
   return zone && zone !== path ? zone : null
 }
 
+function freshnessBoost(recency: number | null): number {
+  if (recency === null || recency > 900) return 0
+  if (recency <= 1) return 0.35
+  if (recency <= 3) return 0.25
+  if (recency <= 7) return 0.15
+  if (recency <= 14) return 0.05
+  return 0
+}
+
 export class RelatedService {
   private readonly nav: Navigator
 
@@ -90,7 +101,9 @@ export class RelatedService {
       label: zone.label,
       path: zone.path,
       score: zone.score,
+      recency: null,
       reasons: ['top-level zone'],
+      signals: ['topology'],
     }))
   }
 
@@ -127,10 +140,12 @@ export class RelatedService {
         label: row.zone_name,
         path: row.zone_name,
         score: row.shared_count,
+        recency: null,
         reasons: [
           `${row.shared_count} shared symbols`,
           ...(sample.length > 0 ? [`shared: ${sample.join(', ')}`] : []),
         ],
+        signals: ['symbols'],
       }
     })
   }
@@ -171,10 +186,12 @@ export class RelatedService {
         label: row.label,
         path: row.path,
         score: row.shared_count,
+        recency: null,
         reasons: [
           `${row.shared_count} shared symbols`,
           ...(sample.length > 0 ? [`shared: ${sample.join(', ')}`] : []),
         ],
+        signals: ['symbols'],
       })
     }
 
@@ -186,13 +203,16 @@ export class RelatedService {
         if (existing) {
           existing.score += 0.5
           existing.reasons.push(`same zone: ${zoneName}`)
+          existing.signals.push('topology')
         } else {
           results.set(sibling.key, {
             key: sibling.key,
             label: sibling.label,
             path: sibling.path,
             score: 0.5,
+            recency: null,
             reasons: [`same zone: ${zoneName}`],
+            signals: ['topology'],
           })
         }
       }
@@ -240,13 +260,16 @@ export class RelatedService {
       if (existing) {
         existing.score += row.shared_sections * 2
         existing.reasons.push(reason)
+        existing.signals.push('docs')
       } else {
         results.set(row.key, {
           key: row.key,
           label: row.label,
           path: row.path,
           score: row.shared_sections * 2,
+          recency: null,
           reasons: [reason],
+          signals: ['docs'],
         })
       }
     }
@@ -278,13 +301,16 @@ export class RelatedService {
       if (existing) {
         existing.score += row.cochange_weight * 1.5
         existing.reasons.push(reason)
+        existing.signals.push('git')
       } else {
         results.set(row.key, {
           key: row.key,
           label: row.label,
           path: row.path,
           score: row.cochange_weight * 1.5,
+          recency: null,
           reasons: [reason],
+          signals: ['git'],
         })
       }
     }
@@ -321,13 +347,16 @@ export class RelatedService {
       if (existing) {
         existing.score += row.issue_weight
         existing.reasons.push(reason)
+        existing.signals.push('issues')
       } else {
         results.set(row.key, {
           key: row.key,
           label: row.label,
           path: row.path,
           score: row.issue_weight,
+          recency: null,
           reasons: [reason],
+          signals: ['issues'],
         })
       }
     }
@@ -342,20 +371,45 @@ export class RelatedService {
         if (existing) {
           existing.score += 3
           existing.reasons.push(`shared flow: ${flow.label}`)
+          existing.signals.push('flows')
         } else {
           results.set(flowNode.key, {
             key: flowNode.key,
             label: flowNode.label,
             path: flowNode.path,
             score: 3,
+            recency: null,
             reasons: [`shared flow: ${flow.label}`],
+            signals: ['flows'],
           })
         }
       }
     }
 
     return [...results.values()]
-      .sort((a, b) => b.score - a.score || (a.path ?? a.label).localeCompare(b.path ?? b.label))
+      .map(result => {
+        const resolved = this.nav.getNode(result.key)
+        const recency = resolved ? this.nav.getStats(resolved.id).recency : null
+        const boost = freshnessBoost(recency)
+        const uniqueSignals = [...new Set(result.signals)]
+        const uniqueReasons = [...new Set(result.reasons)]
+        if (recency !== null && recency <= 14) {
+          uniqueReasons.push(`recently touched (${recency === 0 ? 'today' : `${recency}d`})`)
+        }
+        return {
+          ...result,
+          score: result.score + boost,
+          recency,
+          reasons: uniqueReasons,
+          signals: uniqueSignals,
+        }
+      })
+      .filter(result => !(result.signals.length === 1 && result.signals[0] === 'topology'))
+      .sort((a, b) =>
+        b.score - a.score ||
+        (a.recency ?? 999) - (b.recency ?? 999) ||
+        (a.path ?? a.label).localeCompare(b.path ?? b.label)
+      )
       .slice(0, limit)
   }
 }

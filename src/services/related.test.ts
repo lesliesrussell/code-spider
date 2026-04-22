@@ -63,6 +63,8 @@ describe('RelatedService', () => {
     expect(related[0]?.key).toBe('unit:src/b.ts')
     expect(related[0]?.reasons.some(reason => reason.includes('shared symbols'))).toBe(true)
     expect(related[0]?.reasons.some(reason => reason.includes('same zone'))).toBe(true)
+    expect(related[0]?.signals).toContain('symbols')
+    expect(related[0]?.signals).toContain('topology')
   })
 
   test('finds related zones from shared symbols across zones', async () => {
@@ -98,7 +100,9 @@ describe('RelatedService', () => {
         label: 'tests',
         path: 'tests',
         score: 1,
+        recency: null,
         reasons: ['1 shared symbols', 'shared: ExampleService'],
+        signals: ['symbols'],
       },
     ])
   })
@@ -141,5 +145,47 @@ describe('RelatedService', () => {
     expect(related.length).toBeGreaterThan(0)
     expect(related[0]?.key).toBe('unit:src/b.ts')
     expect(related[0]?.reasons.some(reason => reason.includes('documented together in README.md > Overview'))).toBe(true)
+    expect(related[0]?.signals).toContain('docs')
+  })
+
+  test('filters out same-zone-only neighbors and boosts fresher context-linked results', async () => {
+    const dbPath = makeTempDbPath('code-spider-related-freshness')
+    const db = openDb(dbPath)
+
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-21T12:00:00Z', '2026-04-21T12:01:00Z', '/tmp/repo', 'abc1234', 'test')
+
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES
+         (1, 1, 'zone', 'zone:src', 'src', 'src', null, 0.8, 1),
+         (2, 1, 'unit', 'unit:src/a.ts', 'a.ts', 'src/a.ts', 'TypeScript', 0.7, 1),
+         (3, 1, 'unit', 'unit:src/b.ts', 'b.ts', 'src/b.ts', 'TypeScript', 0.6, 1),
+         (4, 1, 'unit', 'unit:src/c.ts', 'c.ts', 'src/c.ts', 'TypeScript', 0.6, 1),
+         (5, 1, 'issue', 'issue:code-spider-3zr', 'Polish reports and command surfaces for context layer', 'code-spider-3zr', null, 0.8, 1)`
+    ).run()
+
+    db.query(
+      `INSERT INTO stats (run_id, node_id, metric, value)
+       VALUES
+         (1, 2, 'loc', 10), (1, 2, 'churn', 1), (1, 2, 'recency', 5),
+         (1, 3, 'loc', 10), (1, 3, 'churn', 1), (1, 3, 'recency', 1),
+         (1, 4, 'loc', 10), (1, 4, 'churn', 1), (1, 4, 'recency', 30)`
+    ).run()
+
+    db.query(
+      `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, weight)
+       VALUES
+         (1, 5, 3, 'tracked-by', 2),
+         (1, 5, 2, 'tracked-by', 2)`
+    ).run()
+
+    const related = await new RelatedService(db, 1, '/tmp/repo').getRelated('unit:src/a.ts', 5)
+
+    expect(related.some(item => item.key === 'unit:src/c.ts')).toBe(false)
+    expect(related[0]?.key).toBe('unit:src/b.ts')
+    expect(related[0]?.signals).toContain('issues')
+    expect(related[0]?.reasons.some(reason => reason.includes('recently touched (1d)'))).toBe(true)
   })
 })

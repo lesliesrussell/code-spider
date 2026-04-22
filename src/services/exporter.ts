@@ -112,7 +112,7 @@ export class Exporter {
       reasons.push(`${signals.diagnosticCount} diagnostics recorded`)
     }
 
-    const level: RiskAssessment['level'] = severity >= 3 ? 'high' : severity >= 1 ? 'medium' : 'low'
+    const level: RiskAssessment['level'] = severity >= 2 ? 'high' : severity >= 1 ? 'medium' : 'low'
     return {
       level,
       reasons: reasons.length > 0 ? reasons : ['no elevated risk signals detected'],
@@ -126,7 +126,10 @@ export class Exporter {
     }
 
     const fallbackSymbols = symbols
-      .filter(symbol => ['Class', 'Function', 'Interface', 'Method'].includes(symbol.kind))
+      .filter(symbol =>
+        ['Class', 'Function', 'Interface', 'Method'].includes(symbol.kind) &&
+        /^[A-Za-z_$][\w$]*$/.test(symbol.name)
+      )
       .slice(0, 4)
       .map(symbol => symbol.name)
 
@@ -140,17 +143,17 @@ export class Exporter {
     ]
   }
 
-  private getPhaseBoundarySummary(): PhaseBoundarySummary | null {
-    const rows = this.db.query<{ name: string | null; path: string | null }, [number]>(
+  private getPhaseBoundarySummary(nodeId: number): PhaseBoundarySummary | null {
+    const rows = this.db.query<{ name: string | null; path: string | null }, [number, number]>(
       `SELECT s.name as name, n.path as path
        FROM symbols s
        JOIN nodes n ON n.id = s.node_id
-       WHERE s.run_id=?
+       WHERE s.run_id=? AND s.node_id=?
        UNION ALL
        SELECT NULL as name, path
        FROM nodes
-       WHERE run_id=? AND kind='unit'`
-    ).all(this.runId, this.runId)
+       WHERE run_id=? AND id=? AND kind='unit'`
+    ).all(this.runId, nodeId, this.runId, nodeId)
 
     const haystack = rows.flatMap(row => [row.name ?? '', row.path ?? '']).join('\n').toLowerCase()
     const stages: Array<{ label: string; patterns: string[] }> = [
@@ -181,7 +184,7 @@ export class Exporter {
     const freshness = await this.getFreshness()
     const provenance = this.getProvenance()
     const risk = this.getRiskAssessment(node.id, node.score, stats.churn)
-    const phaseBoundary = this.getPhaseBoundarySummary()
+    const phaseBoundary = this.getPhaseBoundarySummary(node.id)
 
     const symbols = this.db.query<SymbolRow, [number, number]>(
       `SELECT name, kind FROM symbols WHERE run_id=? AND node_id=? ORDER BY name LIMIT 50`

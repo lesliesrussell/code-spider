@@ -37,7 +37,9 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   for (const item of related) {
     const path = item.path ?? item.label
-    console.log(`  ${item.key.padEnd(50)}  score: ${item.score.toFixed(2)}  ${path}`)
+    const signals = item.signals.length > 0 ? `  signals: ${item.signals.join(', ')}` : ''
+    const recency = item.recency !== null && item.recency <= 900 ? `  recent: ${item.recency}d` : ''
+    console.log(`  ${item.key.padEnd(50)}  score: ${item.score.toFixed(2)}${recency}${signals}  ${path}`)
     for (const reason of item.reasons.slice(0, 2)) {
       console.log(`    ${reason}`)
     }
