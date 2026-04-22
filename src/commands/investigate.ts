@@ -1,0 +1,142 @@
+import type { CliContext } from '../types'
+import { openDb } from '../db/init'
+import { Navigator } from '../services/navigator'
+import { InvestigationService } from '../services/investigation'
+
+export default async function run(ctx: CliContext): Promise<void> {
+  const db = openDb(ctx.dbPath)
+  const svc = new InvestigationService(db)
+  const subcommand = ctx.args[0]
+
+  if (!subcommand) {
+    // List all investigations
+    const list = svc.list()
+    if (ctx.json) {
+      console.log(JSON.stringify(list, null, 2))
+      return
+    }
+    if (list.length === 0) {
+      console.log('No investigations yet. Start one with: code-spider investigate start "<question>"')
+      return
+    }
+    console.log('Investigations')
+    console.log()
+    for (const inv of list) {
+      console.log(`  #${String(inv.id).padEnd(4)}  [${inv.status}]  ${inv.question.slice(0, 60)}`)
+      console.log(`        ${inv.nodeCount} nodes  ·  ${inv.createdAt.slice(0, 10)}`)
+      console.log()
+    }
+    return
+  }
+
+  if (subcommand === 'start') {
+    const question = ctx.args.slice(1).join(' ')
+    if (!question) {
+      console.error('Usage: code-spider investigate start "<question>"')
+      process.exit(1)
+    }
+    const runId = Navigator.latestRunId(db, ctx.repoRoot) ?? undefined
+    const id = svc.start(question, runId)
+    if (ctx.json) {
+      console.log(JSON.stringify({ id, question }))
+    } else {
+      console.log(`Investigation #${id} started`)
+      console.log(`  ${question}`)
+    }
+    return
+  }
+
+  if (subcommand === 'show') {
+    const idStr = ctx.args[1]
+    if (!idStr) {
+      console.error('Usage: code-spider investigate show <id>')
+      process.exit(1)
+    }
+    const id = parseInt(idStr, 10)
+    let detail
+    try {
+      detail = svc.show(id)
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
+
+    if (ctx.json) {
+      console.log(JSON.stringify(detail, null, 2))
+      return
+    }
+
+    console.log(`Investigation #${detail.id}  [${detail.status}]`)
+    console.log(`  ${detail.question}`)
+    console.log()
+    if (detail.summary) {
+      console.log('Notes')
+      console.log(`  ${detail.summary}`)
+      console.log()
+    }
+    if (detail.nodes.length > 0) {
+      console.log(`Nodes (${detail.nodes.length})`)
+      for (const n of detail.nodes) {
+        const noteStr = n.note ? `  — ${n.note}` : ''
+        console.log(`  [${n.kind}] ${n.key}${noteStr}`)
+      }
+      console.log()
+    } else {
+      console.log('  (no nodes added yet)')
+    }
+    return
+  }
+
+  if (subcommand === 'add') {
+    const idStr = ctx.args[1]
+    const nodeRef = ctx.args[2]
+    if (!idStr || !nodeRef) {
+      console.error('Usage: code-spider investigate add <inv-id> <node-ref>')
+      process.exit(1)
+    }
+    const id = parseInt(idStr, 10)
+    const runId = Navigator.latestRunId(db, ctx.repoRoot)
+    if (runId === null) {
+      console.error('No index found. Run: code-spider index')
+      process.exit(1)
+    }
+    try {
+      svc.addNode(id, nodeRef, runId)
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
+    if (ctx.json) {
+      console.log(JSON.stringify({ ok: true, investigationId: id, nodeRef }))
+    } else {
+      console.log(`Added ${nodeRef} to investigation #${id}`)
+    }
+    return
+  }
+
+  if (subcommand === 'note') {
+    const idStr = ctx.args[1]
+    const text = ctx.args.slice(2).join(' ')
+    if (!idStr || !text) {
+      console.error('Usage: code-spider investigate note <inv-id> <text>')
+      process.exit(1)
+    }
+    const id = parseInt(idStr, 10)
+    try {
+      svc.addNote(id, text)
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
+    if (ctx.json) {
+      console.log(JSON.stringify({ ok: true, investigationId: id }))
+    } else {
+      console.log(`Note added to investigation #${id}`)
+    }
+    return
+  }
+
+  console.error(`Unknown subcommand: ${subcommand}`)
+  console.error('Available: start, add, note, show, (none = list)')
+  process.exit(1)
+}

@@ -1,0 +1,215 @@
+# Analyzer registry schema for code-spider.
+# This file is the shipped default registry and defines the contract that the
+# runtime loader will parse and validate.
+#
+# Top-level shape:
+# version: integer schema version
+# capabilities: optional list of recognized capability names
+# languages: list of language definitions
+#
+# Language definition:
+# - id: stable lowercase identifier used internally
+# - display_name: human-readable name shown in reporting
+# - aliases: optional alternate ids
+# - detect:
+#     extensions: optional file extensions including the dot
+#     manifests: optional repo files that signal the language/toolchain
+# - analyzers: list of analyzer candidates for this language
+#
+# Analyzer definition:
+# - id: stable analyzer identifier unique within the language
+# - kind: analyzer category (lsp, quality, heuristic)
+# - tool: executable/tool name
+# - command: argv template, with optional placeholders such as
+#     {repo_root}, {file}, {language}
+# - capabilities: subset of the recognized capability names
+# - priority: higher number wins when multiple analyzers satisfy a capability
+# - required_files: optional files that must exist before the analyzer is eligible
+# - notes: optional human-readable fallback/execution notes
+version: 1
+
+capabilities:
+  - symbols
+  - defs
+  - refs
+  - diagnostics
+
+languages:
+  - id: typescript
+    display_name: TypeScript
+    aliases:
+      - ts
+      - tsx
+    detect:
+      extensions:
+        - .ts
+        - .tsx
+      manifests:
+        - package.json
+        - tsconfig.json
+    analyzers:
+      - id: tsserver-lsp
+        kind: lsp
+        tool: typescript-language-server
+        command:
+          - typescript-language-server
+          - --stdio
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+        required_files:
+          - package.json
+      - id: ts-basic-heuristic
+        kind: heuristic
+        tool: builtin
+        command:
+          - heuristic-symbols
+        capabilities:
+          - symbols
+        priority: 10
+        notes: Built-in fallback symbol extraction for TypeScript when no language server is available.
+
+  - id: javascript
+    display_name: JavaScript
+    aliases:
+      - js
+      - jsx
+    detect:
+      extensions:
+        - .js
+        - .jsx
+        - .mjs
+        - .cjs
+      manifests:
+        - package.json
+    analyzers:
+      - id: tsserver-lsp
+        kind: lsp
+        tool: typescript-language-server
+        command:
+          - typescript-language-server
+          - --stdio
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+      - id: js-basic-heuristic
+        kind: heuristic
+        tool: builtin
+        command:
+          - heuristic-symbols
+        capabilities:
+          - symbols
+        priority: 10
+        notes: Built-in fallback symbol extraction for JavaScript when no language server is available.
+
+  - id: python
+    display_name: Python
+    detect:
+      extensions:
+        - .py
+      manifests:
+        - pyproject.toml
+        - requirements.txt
+        - setup.py
+    analyzers:
+      - id: pyright-lsp
+        kind: lsp
+        tool: pyright-langserver
+        command:
+          - pyright-langserver
+          - --stdio
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+      - id: pylsp
+        kind: lsp
+        tool: pylsp
+        command:
+          - pylsp
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 80
+
+  - id: go
+    display_name: Go
+    detect:
+      extensions:
+        - .go
+      manifests:
+        - go.mod
+    analyzers:
+      - id: gopls
+        kind: lsp
+        tool: gopls
+        command:
+          - gopls
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+
+  - id: rust
+    display_name: Rust
+    detect:
+      extensions:
+        - .rs
+      manifests:
+        - Cargo.toml
+    analyzers:
+      - id: rust-analyzer
+        kind: lsp
+        tool: rust-analyzer
+        command:
+          - rust-analyzer
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+
+  - id: zig
+    display_name: Zig
+    detect:
+      extensions:
+        - .zig
+      manifests:
+        - build.zig
+        - build.zig.zon
+    analyzers:
+      - id: zls
+        kind: lsp
+        tool: zls
+        command:
+          - zls
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+      - id: zig-ast-check
+        kind: quality
+        tool: zig
+        command:
+          - zig
+          - ast-check
+          - "{file}"
+        capabilities:
+          - diagnostics
+        priority: 50
+        notes: File-scoped fallback when zls is unavailable.

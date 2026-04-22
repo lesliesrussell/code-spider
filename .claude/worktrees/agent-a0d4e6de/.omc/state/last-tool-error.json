@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"bun x tsc --noEmit --project /Users/leslierussell/repo/code-spider/tsconfig.json 2>&1\",\"timeout\":30000}",
+  "error": "Exit code 2\n../../../src/adapters/lsp.ts(134,7): error TS18047: 'proc.stdin' is possibly 'null'.\n../../../src/adapters/lsp.ts(139,5): error TS18047: 'proc.stdout' is possibly 'null'.\n../../../src/services/semantic-enricher.ts(52,80): error TS2344: Type 'unknown[]' does not satisfy the constraint 'SQLQueryBindings | SQLQueryBindings[]'.\n  Type 'unknown[]' is not assignable to type 'SQLQueryBindings[]'.\n    Type 'unknown' is not assignable to type 'SQLQueryBindings'.",
+  "timestamp": "2026-04-19T07:55:57.855Z",
+  "retry_count": 2
+}

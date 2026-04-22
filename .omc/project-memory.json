@@ -1,0 +1,257 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776583030125,
+  "projectRoot": "/Users/leslierussell/repo/code-spider",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {},
+  "hotPaths": [
+    {
+      "path": "src/services/navigator.ts",
+      "accessCount": 7,
+      "lastAccessed": 1776585636563,
+      "type": "file"
+    },
+    {
+      "path": "src/adapters/filesystem.ts",
+      "accessCount": 6,
+      "lastAccessed": 1776584218811,
+      "type": "file"
+    },
+    {
+      "path": "src/index.ts",
+      "accessCount": 6,
+      "lastAccessed": 1776584495837,
+      "type": "file"
+    },
+    {
+      "path": "src/db/init.ts",
+      "accessCount": 6,
+      "lastAccessed": 1776585632363,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/zones.ts",
+      "accessCount": 5,
+      "lastAccessed": 1776584771132,
+      "type": "file"
+    },
+    {
+      "path": "src/db/schema.ts",
+      "accessCount": 5,
+      "lastAccessed": 1776585635781,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 3,
+      "lastAccessed": 1776583732268,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/index-cmd.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776584115421,
+      "type": "file"
+    },
+    {
+      "path": "src/types.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776584496191,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/overview.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776584544008,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/show.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776584560888,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/children.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776584566332,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/flows.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776585729508,
+      "type": "file"
+    },
+    {
+      "path": "src/services/flow-detector.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776585834941,
+      "type": "file"
+    },
+    {
+      "path": "code-spider-prd-spec2.md",
+      "accessCount": 2,
+      "lastAccessed": 1776583100551,
+      "type": "file"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 2,
+      "lastAccessed": 1776583177243,
+      "type": "file"
+    },
+    {
+      "path": "tsconfig.json",
+      "accessCount": 2,
+      "lastAccessed": 1776584034838,
+      "type": "file"
+    },
+    {
+      "path": "src/adapters/lsp.ts",
+      "accessCount": 2,
+      "lastAccessed": 1776585503575,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/investigate.ts",
+      "accessCount": 2,
+      "lastAccessed": 1776585743331,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/export-cmd.ts",
+      "accessCount": 2,
+      "lastAccessed": 1776585746822,
+      "type": "file"
+    },
+    {
+      "path": "nardo.yaml",
+      "accessCount": 1,
+      "lastAccessed": 1776583083404,
+      "type": "file"
+    },
+    {
+      "path": "AGENTS.md",
+      "accessCount": 1,
+      "lastAccessed": 1776583083719,
+      "type": "file"
+    },
+    {
+      "path": "code-spider-prd.md",
+      "accessCount": 1,
+      "lastAccessed": 1776583083825,
+      "type": "file"
+    },
+    {
+      "path": "code-spider-prd-spec1.md",
+      "accessCount": 1,
+      "lastAccessed": 1776583100761,
+      "type": "file"
+    },
+    {
+      "path": "index.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776583458492,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/doctor.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776583697035,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/related.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776583704542,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/refs.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776583705151,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/defs.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776583705463,
+      "type": "file"
+    },
+    {
+      "path": "src/commands/atoms.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776583705764,
+      "type": "file"
+    },
+    {
+      "path": "src/adapters/git.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776584082667,
+      "type": "file"
+    },
+    {
+      "path": "src/adapters/line-count.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776584082934,
+      "type": "file"
+    },
+    {
+      "path": "src/services/indexer.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776584115161,
+      "type": "file"
+    },
+    {
+      "path": "src",
+      "accessCount": 1,
+      "lastAccessed": 1776584742554,
+      "type": "directory"
+    },
+    {
+      "path": "src/services/doctor.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776585479423,
+      "type": "directory"
+    },
+    {
+      "path": "src/services/investigation.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776585702264,
+      "type": "file"
+    },
+    {
+      "path": "src/services/exporter.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776585718909,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

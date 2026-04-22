@@ -1,0 +1,30 @@
+{
+  "name": "code-spider",
+  "version": "0.1.0",
+  "description": "Repository indexing and analysis CLI",
+  "module": "src/index.ts",
+  "bin": { "code-spider": "src/index.ts" },
+  "type": "module",
+  "private": false,
+  "files": [
+    "config",
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "cli",
+    "analysis",
+    "repository",
+    "code"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --compile --outfile dist/code-spider",
+    "test": "bun test"
+  }
+}

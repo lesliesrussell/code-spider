@@ -1,0 +1,45 @@
+import type { CliContext } from '../types'
+import { openDb } from '../db/init'
+import { Navigator } from '../services/navigator'
+import { RelatedService } from '../services/related'
+
+export default async function run(ctx: CliContext): Promise<void> {
+  const nodeRef = ctx.args[0]
+  if (!nodeRef) {
+    console.error('Usage: code-spider related <node-ref>')
+    process.exit(1)
+  }
+
+  const db = openDb(ctx.dbPath)
+  const runId = Navigator.latestRunId(db, ctx.repoRoot)
+  if (runId === null) {
+    console.error('No index found. Run: code-spider index')
+    process.exit(1)
+  }
+
+  const limitFlag = ctx.flags['limit']
+  const limit = typeof limitFlag === 'string' ? parseInt(limitFlag, 10) : 10
+
+  const related = await new RelatedService(db, runId, ctx.repoRoot).getRelated(nodeRef, limit)
+
+  if (ctx.json) {
+    console.log(JSON.stringify(related, null, 2))
+    return
+  }
+
+  console.log(`Related to ${nodeRef}`)
+  console.log()
+
+  if (related.length === 0) {
+    console.log('  (no related nodes)')
+    return
+  }
+
+  for (const item of related) {
+    const path = item.path ?? item.label
+    console.log(`  ${item.key.padEnd(50)}  score: ${item.score.toFixed(2)}  ${path}`)
+    for (const reason of item.reasons.slice(0, 2)) {
+      console.log(`    ${reason}`)
+    }
+  }
+}
