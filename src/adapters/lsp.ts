@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
 import type { RegistryAnalyzer, RegistryLanguage } from '../analyzer-registry'
 
@@ -69,6 +69,27 @@ function fileUri(filePath: string): string {
 
 function uriToPath(uri: string): string {
   return uri.startsWith('file://') ? uri.slice('file://'.length) : uri
+}
+
+function collectWorkspaceFiles(repoRoot: string, extensions: string[], ignoreDirs = new Set(['.git', '.code-spider', 'node_modules'])): string[] {
+  const results: string[] = []
+
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (ignoreDirs.has(entry.name)) continue
+      const fullPath = `${dir}/${entry.name}`
+      if (entry.isDirectory()) {
+        visit(fullPath)
+        continue
+      }
+      if (extensions.some(ext => entry.name.endsWith(ext))) {
+        results.push(fullPath)
+      }
+    }
+  }
+
+  visit(repoRoot)
+  return results
 }
 
 function isPosition(value: unknown): value is { line: number; character: number } {
@@ -266,6 +287,7 @@ async function tryRealLspReferences(
   languageId: string,
   position: { line: number; character: number },
   repoRoot: string,
+  workspaceFiles: Array<{ path: string; text: string }>,
 ): Promise<LspLocation[] | null> {
   return new Promise((resolve) => {
     const [bin, ...args] = command
@@ -322,9 +344,16 @@ async function tryRealLspReferences(
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
           send({ jsonrpc: '2.0', method: 'initialized', params: {} })
-          send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
-            textDocument: { uri, languageId, version: 1, text }
-          }})
+          for (const workspaceFile of workspaceFiles) {
+            send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
+              textDocument: {
+                uri: fileUri(workspaceFile.path),
+                languageId,
+                version: 1,
+                text: workspaceFile.text,
+              },
+            }})
+          }
           referenceRequested = true
           send({ jsonrpc: '2.0', id: 2, method: 'textDocument/references', params: {
             textDocument: { uri },
@@ -597,7 +626,29 @@ export class LspAdapter {
     }
 
     try {
-      const locations = await tryRealLspReferences(filePath, selectedCommand, langLower, position, repoRoot)
+      const extensions = languageDef?.detect.extensions ?? []
+      const workspacePaths = extensions.length > 0
+        ? collectWorkspaceFiles(repoRoot, extensions)
+        : [filePath]
+      const workspaceFiles = workspacePaths.flatMap(path => {
+        try {
+          return [{ path, text: readFileSync(path, 'utf8') }]
+        } catch {
+          return []
+        }
+      })
+      const ensuredTarget = workspaceFiles.some(file => file.path === filePath)
+        ? workspaceFiles
+        : [{ path: filePath, text: readFileSync(filePath, 'utf8') }, ...workspaceFiles]
+
+      const locations = await tryRealLspReferences(
+        filePath,
+        selectedCommand,
+        langLower,
+        position,
+        repoRoot,
+        ensuredTarget,
+      )
       if (locations !== null) {
         return {
           locations: locations.map(location => ({

@@ -19,7 +19,7 @@ function makeTempDir(name: string): string {
   return dir
 }
 
-function writeFakeServer(mode: 'symbols' | 'refs' | 'diagnostics', outputPath: string): string {
+function writeFakeServer(mode: 'symbols' | 'refs' | 'diagnostics' | 'workspace-refs', outputPath: string): string {
   const scriptPath = join(makeTempDir(`code-spider-lsp-${mode}`), 'server.js')
   const script = `
 const fs = require('node:fs')
@@ -28,6 +28,7 @@ const mode = ${JSON.stringify(mode)}
 let initialized = false
 let opened = false
 let initRootUri = null
+let openedUris = []
 let buf = ''
 
 function send(msg) {
@@ -36,7 +37,7 @@ function send(msg) {
 }
 
 function record(extra = {}) {
-  fs.writeFileSync(outputPath, JSON.stringify({ initialized, opened, initRootUri, ...extra }))
+  fs.writeFileSync(outputPath, JSON.stringify({ initialized, opened, initRootUri, openedUris, ...extra }))
 }
 
 process.stdin.on('data', chunk => {
@@ -71,6 +72,7 @@ process.stdin.on('data', chunk => {
 
     if (msg.method === 'textDocument/didOpen') {
       opened = true
+      openedUris.push(msg.params.textDocument.uri)
       record()
       if (mode === 'diagnostics' && initialized) {
         send({
@@ -116,16 +118,34 @@ process.stdin.on('data', chunk => {
 
     if (msg.method === 'textDocument/references') {
       record({ requestReceived: 'references' })
+      const hasWorkspaceHydration = Array.isArray(openedUris) && openedUris.length > 1
       send({
         jsonrpc: '2.0',
         id: msg.id,
-        result: initialized && opened ? [{
-          uri: msg.params.textDocument.uri,
-          range: {
-            start: { line: 8, character: 6 },
-            end: { line: 8, character: 21 },
-          },
-        }] : [],
+        result: initialized && opened ? (mode === 'workspace-refs'
+          ? (hasWorkspaceHydration ? [
+              {
+                uri: openedUris[0],
+                range: {
+                  start: { line: 0, character: 13 },
+                  end: { line: 0, character: 27 },
+                },
+              },
+              {
+                uri: openedUris[1],
+                range: {
+                  start: { line: 1, character: 6 },
+                  end: { line: 1, character: 20 },
+                },
+              },
+            ] : [])
+          : [{
+              uri: msg.params.textDocument.uri,
+              range: {
+                start: { line: 8, character: 6 },
+                end: { line: 8, character: 21 },
+              },
+            }]) : [],
       })
       continue
     }
@@ -269,6 +289,36 @@ describe('LspAdapter', () => {
       opened: true,
       initRootUri: `file://${repoRoot}`,
     })
+  })
+
+  test('hydrates workspace files before references queries', async () => {
+    const repoRoot = makeTempDir('code-spider-lsp-workspace-refs-repo')
+    const filePath = join(repoRoot, 'service.ts')
+    const otherPath = join(repoRoot, 'consumer.ts')
+    const statePath = join(repoRoot, 'workspace-refs-state.json')
+    writeFileSync(filePath, 'export class ExampleService {}\n')
+    writeFileSync(otherPath, 'import { ExampleService } from "./service"\nnew ExampleService()\n')
+    const serverPath = writeFakeServer('workspace-refs', statePath)
+
+    const result = await new LspAdapter().getReferences(
+      filePath,
+      'TypeScript',
+      { line: 0, character: 13 },
+      repoRoot,
+      [process.execPath, serverPath, statePath],
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.locations).toHaveLength(2)
+    expect(new Set(result.locations.map(location => location.path))).toEqual(new Set([filePath, otherPath]))
+
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as {
+      initialized: boolean
+      openedUris: string[]
+    }
+    expect(state.initialized).toBe(true)
+    expect(state.openedUris).toContain(`file://${filePath}`)
+    expect(state.openedUris).toContain(`file://${otherPath}`)
   })
 
   test('sends initialized before diagnostics subscriptions', async () => {

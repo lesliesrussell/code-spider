@@ -144,6 +144,7 @@ process.stdin.on('data', chunk => {
   return serverPath
 }
 
+
 describe('fixture-backed semantic integration', () => {
   test('indexes and semantically enriches a TypeScript fixture repo', async () => {
     const repoRoot = copyFixture('typescript-mini')
@@ -294,4 +295,5 @@ describe('fixture-backed semantic integration', () => {
     expect(paths.has('src/consumer.ts')).toBe(true)
     expect(paths.has('src/consumer.test.ts')).toBe(true)
   })
+
 })
