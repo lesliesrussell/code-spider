@@ -44,6 +44,7 @@ export interface AtomMatch {
   anchorLine: number | null
   anchorColumn: number | null
   heuristic: boolean
+  lowSignal: boolean
 }
 
 interface DefinitionRow {
@@ -80,6 +81,16 @@ function isHeuristic(metadataJson: string | null): boolean {
   try {
     const metadata = JSON.parse(metadataJson) as { mode?: string }
     return metadata.mode === 'heuristic'
+  } catch {
+    return false
+  }
+}
+
+function isLowSignal(metadataJson: string | null): boolean {
+  if (!metadataJson) return false
+  try {
+    const metadata = JSON.parse(metadataJson) as { signal?: string }
+    return metadata.signal === 'low'
   } catch {
     return false
   }
@@ -230,6 +241,7 @@ export class SemanticQueryService {
         anchorLine: selectionRange?.start?.line ?? range?.start?.line ?? null,
         anchorColumn: selectionRange?.start?.character ?? range?.start?.character ?? null,
         heuristic: isHeuristic(row.metadata_json),
+        lowSignal: isLowSignal(row.metadata_json),
       }
     })
   }

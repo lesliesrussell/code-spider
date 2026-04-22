@@ -43,7 +43,11 @@ export default async function run(ctx: CliContext): Promise<void> {
     const line = atom.anchorLine !== null ? atom.anchorLine + 1 : '?'
     const column = atom.anchorColumn !== null ? atom.anchorColumn + 1 : '?'
     const container = atom.containerName ? `  in ${atom.containerName}` : ''
-    const mode = atom.heuristic ? '  [heuristic]' : ''
-    console.log(`  ${String(line).padStart(4)}:${String(column).padEnd(4)}  ${atom.kind.padEnd(12)}  ${atom.name}${container}${mode}`)
+    const flags = [
+      atom.heuristic ? '[heuristic]' : null,
+      atom.lowSignal ? '[low-signal]' : null,
+    ].filter(flag => flag !== null).join('  ')
+    const suffix = flags ? `  ${flags}` : ''
+    console.log(`  ${String(line).padStart(4)}:${String(column).padEnd(4)}  ${atom.kind.padEnd(12)}  ${atom.name}${container}${suffix}`)
   }
 }

@@ -10,6 +10,7 @@ export interface LspSymbol {
   containerName?: string
   range: { start: { line: number; character: number }; end: { line: number; character: number } }
   selectionRange?: { start: { line: number; character: number }; end: { line: number; character: number } }
+  signal?: 'low'
 }
 
 export interface LspDiagnostic {
@@ -53,6 +54,29 @@ const LSP_SYMBOL_KIND_NAMES: Record<number, string> = {
   20: 'Key', 21: 'Null', 22: 'EnumMember', 23: 'Struct', 24: 'Event',
   25: 'Operator', 26: 'TypeParameter',
 }
+
+const LOW_SIGNAL_IDENTIFIER_NAMES = new Set([
+  'arg',
+  'args',
+  'ctx',
+  'data',
+  'detail',
+  'entry',
+  'item',
+  'node',
+  'options',
+  'opts',
+  'param',
+  'params',
+  'result',
+  'results',
+  'row',
+  'rows',
+  'value',
+  'values',
+])
+
+const LOW_SIGNAL_IDENTIFIER_KINDS = new Set(['Constant', 'Field', 'Property', 'Variable'])
 
 function isAvailable(bin: string): boolean {
   try {
@@ -108,6 +132,13 @@ function defaultRange(): LspRange {
   return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
 }
 
+export function classifySymbolSignal(name: string, kindName: string): 'low' | undefined {
+  if (!name) return undefined
+  if (/[().\[\]\s]/.test(name)) return 'low'
+  if (LOW_SIGNAL_IDENTIFIER_KINDS.has(kindName) && LOW_SIGNAL_IDENTIFIER_NAMES.has(name)) return 'low'
+  return undefined
+}
+
 function extractSymbolRange(raw: Record<string, unknown>): LspRange {
   if (isRange(raw['range'])) return raw['range']
 
@@ -135,14 +166,16 @@ export function normalizeDocumentSymbolResult(result: unknown): LspSymbol[] {
     const raw = entry as Record<string, unknown>
     const name = typeof raw['name'] === 'string' ? raw['name'] : ''
     const kind = typeof raw['kind'] === 'number' ? raw['kind'] : 13
+    const kindName = LSP_SYMBOL_KIND_NAMES[kind] ?? 'Variable'
     const range = extractSymbolRange(raw)
     symbols.push({
       name,
       kind,
-      kindName: LSP_SYMBOL_KIND_NAMES[kind] ?? 'Variable',
+      kindName,
       containerName: typeof raw['containerName'] === 'string' ? raw['containerName'] : containerName,
       range,
       selectionRange: extractSelectionRange(raw),
+      signal: classifySymbolSignal(name, kindName),
     })
 
     const children = raw['children']

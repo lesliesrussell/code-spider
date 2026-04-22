@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { LspAdapter, applyInferredSelectionRanges, normalizeDocumentSymbolResult } from './lsp'
+import { LspAdapter, applyInferredSelectionRanges, classifySymbolSignal, normalizeDocumentSymbolResult } from './lsp'
 
 const tempDirs: string[] = []
 
@@ -211,6 +211,13 @@ describe('normalizeDocumentSymbolResult', () => {
       start: { line: 0, character: 13 },
       end: { line: 0, character: 27 },
     })
+  })
+
+  test('classifies callback-style and placeholder locals as low-signal', () => {
+    expect(classifySymbolSignal('map() callback', 'Function')).toBe('low')
+    expect(classifySymbolSignal('item', 'Variable')).toBe('low')
+    expect(classifySymbolSignal('Exporter', 'Class')).toBeUndefined()
+    expect(classifySymbolSignal('repoRoot', 'Variable')).toBeUndefined()
   })
 })
 

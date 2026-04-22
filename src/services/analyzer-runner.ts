@@ -9,6 +9,9 @@ import type {
   RegistryLanguage,
 } from '../analyzer-registry'
 import { LspAdapter, type LspDiagnostic, type LspLocation, type LspSymbol } from '../adapters/lsp'
+import { BuiltinLanguagePluginRegistry } from '../language-plugin-registry'
+import type { LanguagePlugin, PluginExecutionAttempt } from '../language-plugin'
+import { heuristicSymbols } from '../plugins/shared/heuristic-symbols'
 
 export interface RunnerSymbolResult {
   analyzerId: number | null
@@ -51,6 +54,16 @@ interface QualityExecutionResult {
   error?: string
 }
 
+interface RunnerArgsBase {
+  db: Database
+  runId: number
+  nodeId: number
+  filePath: string
+  repoRoot: string
+  language: string
+  target: string
+}
+
 export interface AnalyzerRunnerOptions {
   registry?: AnalyzerRegistryDocument
   commandExists?: (bin: string) => boolean
@@ -66,59 +79,18 @@ function defaultCommandExists(bin: string): boolean {
   }
 }
 
-function heuristicSymbols(source: string): LspSymbol[] {
-  const symbols: LspSymbol[] = []
-  const zeroRange = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
-
-  const patterns: Array<{ re: RegExp; kind: number; kindName: string }> = [
-    { re: /^(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/gm, kind: 5, kindName: 'Class' },
-    { re: /^(?:export\s+)?interface\s+(\w+)/gm, kind: 11, kindName: 'Interface' },
-    { re: /^(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm, kind: 12, kindName: 'Function' },
-    { re: /^(?:export\s+)?type\s+(\w+)\s*=/gm, kind: 26, kindName: 'TypeParameter' },
-    { re: /^(?:export\s+)?(?:const|let)\s+(\w+)/gm, kind: 13, kindName: 'Variable' },
-  ]
-
-  const seen = new Set<string>()
-
-  for (const { re, kind, kindName } of patterns) {
-    let match: RegExpExecArray | null
-    re.lastIndex = 0
-    while ((match = re.exec(source)) !== null) {
-      const name = match[1]
-      if (name === undefined) continue
-      const key = `${kindName}:${name}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      symbols.push({ name, kind, kindName, range: zeroRange, selectionRange: zeroRange })
-    }
-  }
-
-  const methodRe = /^\s{2,}(?:async\s+)?(?:(?:public|private|protected|static|override)\s+)*(\w+)\s*\(/gm
-  let match: RegExpExecArray | null
-  methodRe.lastIndex = 0
-  const blacklist = new Set(['if', 'for', 'while', 'switch', 'catch', 'constructor', 'return'])
-  while ((match = methodRe.exec(source)) !== null) {
-    const name = match[1]
-    if (name === undefined || blacklist.has(name)) continue
-    const key = `Method:${name}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    symbols.push({ name, kind: 6, kindName: 'Method', range: zeroRange, selectionRange: zeroRange })
-  }
-
-  return symbols
-}
-
 export class AnalyzerRunner {
   private readonly registry: AnalyzerRegistryDocument
   private readonly commandExists: (bin: string) => boolean
   private readonly lsp: Pick<LspAdapter, 'getSymbols' | 'getDiagnostics' | 'getReferences'>
+  private readonly plugins: BuiltinLanguagePluginRegistry
   private readonly analyzerRowCache = new Map<string, number>()
 
   constructor(options: AnalyzerRunnerOptions = {}) {
     this.registry = options.registry ?? loadDefaultAnalyzerRegistry()
     this.commandExists = options.commandExists ?? defaultCommandExists
     this.lsp = options.lspAdapter ?? new LspAdapter()
+    this.plugins = new BuiltinLanguagePluginRegistry(this.registry, this.commandExists, this.lsp)
   }
 
   getSupportedLanguages(): string[] {
@@ -150,20 +122,96 @@ export class AnalyzerRunner {
     return inserted
   }
 
-  async executeSymbols(args: {
-    db: Database
-    runId: number
-    nodeId: number
-    filePath: string
-    repoRoot: string
-    language: string
-    target: string
-  }): Promise<RunnerSymbolResult> {
+  async executeSymbols(args: RunnerArgsBase): Promise<RunnerSymbolResult> {
     const language = this.findLanguage(args.language)
     if (language === undefined) {
       return { analyzerId: null, symbols: [], error: `unsupported-language: ${args.language}` }
     }
 
+    const plugin = this.plugins.getByLanguage(language.id)
+    if (plugin !== undefined) return this.executePluginSymbols(args, language.id, plugin)
+    return this.executeSymbolsLegacy(args, language)
+  }
+
+  async executeDiagnostics(args: RunnerArgsBase): Promise<RunnerDiagnosticsResult> {
+    const language = this.findLanguage(args.language)
+    if (language === undefined) {
+      return { analyzerId: null, diagnostics: [], error: `unsupported-language: ${args.language}` }
+    }
+
+    const plugin = this.plugins.getByLanguage(language.id)
+    if (plugin !== undefined) return this.executePluginDiagnostics(args, language.id, plugin)
+    return this.executeDiagnosticsLegacy(args, language)
+  }
+
+  async executeReferences(args: RunnerArgsBase & { position: { line: number; character: number } }): Promise<RunnerReferencesResult> {
+    const language = this.findLanguage(args.language)
+    if (language === undefined) {
+      return { analyzerId: null, locations: [], error: `unsupported-language: ${args.language}` }
+    }
+
+    const plugin = this.plugins.getByLanguage(language.id)
+    if (plugin !== undefined) return this.executePluginReferences(args, language.id, plugin)
+    return this.executeReferencesLegacy(args, language)
+  }
+
+  private async executePluginSymbols(
+    args: RunnerArgsBase,
+    languageId: string,
+    plugin: LanguagePlugin,
+  ): Promise<RunnerSymbolResult> {
+    const result = await plugin.getSymbols({
+      repoRoot: args.repoRoot,
+      filePath: args.filePath,
+      languageId,
+    })
+    const analyzerId = this.recordPluginAttempts(args.db, args.runId, args.nodeId, languageId, 'symbols', args.target, args.repoRoot, result.attempts)
+    return {
+      analyzerId,
+      symbols: result.items as LspSymbol[],
+      mode: result.mode === 'heuristic' ? 'heuristic' : (result.mode === 'lsp' ? 'lsp' : undefined),
+      error: result.error,
+    }
+  }
+
+  private async executePluginDiagnostics(
+    args: RunnerArgsBase,
+    languageId: string,
+    plugin: LanguagePlugin,
+  ): Promise<RunnerDiagnosticsResult> {
+    const result = await plugin.getDiagnostics({
+      repoRoot: args.repoRoot,
+      filePath: args.filePath,
+      languageId,
+    })
+    const analyzerId = this.recordPluginAttempts(args.db, args.runId, args.nodeId, languageId, 'diagnostics', args.target, args.repoRoot, result.attempts)
+    return { analyzerId, diagnostics: result.items as LspDiagnostic[], error: result.error }
+  }
+
+  private async executePluginReferences(
+    args: RunnerArgsBase & { position: { line: number; character: number } },
+    languageId: string,
+    plugin: LanguagePlugin,
+  ): Promise<RunnerReferencesResult> {
+    const result = await plugin.getReferences({
+      repoRoot: args.repoRoot,
+      filePath: args.filePath,
+      languageId,
+      position: args.position,
+    })
+    const analyzerId = this.recordPluginAttempts(args.db, args.runId, args.nodeId, languageId, 'refs', args.target, args.repoRoot, result.attempts)
+    return {
+      analyzerId,
+      locations: result.items.map(reference => ({
+        uri: `file://${reference.path}`,
+        path: reference.path,
+        range: reference.range,
+      })),
+      error: result.error,
+    }
+  }
+
+  private async executeSymbolsLegacy(args: RunnerArgsBase, language: RegistryLanguage): Promise<RunnerSymbolResult> {
     const candidates = this.getCandidates(args.repoRoot, language, 'symbols')
     if (candidates.length === 0) {
       return { analyzerId: null, symbols: [], error: `no-analyzer: ${language.id}` }
@@ -216,8 +264,7 @@ export class AnalyzerRunner {
         }
 
         if (candidate.analyzer.kind === 'heuristic') {
-          const source = readFileSync(args.filePath, 'utf8')
-          const symbols = heuristicSymbols(source)
+          const symbols = heuristicSymbols(readFileSync(args.filePath, 'utf8'))
           const durationMs = Date.now() - started
           const status = symbols.length > 0 ? 'success' : 'no_result'
           this.recordAnalyzerRun(args.db, args.runId, {
@@ -264,20 +311,7 @@ export class AnalyzerRunner {
     return { analyzerId: null, symbols: [], error: `no-symbols: ${args.target}` }
   }
 
-  async executeDiagnostics(args: {
-    db: Database
-    runId: number
-    nodeId: number
-    filePath: string
-    repoRoot: string
-    language: string
-    target: string
-  }): Promise<RunnerDiagnosticsResult> {
-    const language = this.findLanguage(args.language)
-    if (language === undefined) {
-      return { analyzerId: null, diagnostics: [], error: `unsupported-language: ${args.language}` }
-    }
-
+  private async executeDiagnosticsLegacy(args: RunnerArgsBase, language: RegistryLanguage): Promise<RunnerDiagnosticsResult> {
     const candidates = this.getCandidates(args.repoRoot, language, 'diagnostics')
     if (candidates.length === 0) {
       return { analyzerId: null, diagnostics: [], error: `no-analyzer: ${language.id}` }
@@ -319,10 +353,7 @@ export class AnalyzerRunner {
             target: args.target,
             durationMs,
             errorMessage: result.error,
-            metadata: {
-              diagnosticCount: result.diagnostics.length,
-              kind: candidate.analyzer.kind,
-            },
+            metadata: { diagnosticCount: result.diagnostics.length, kind: candidate.analyzer.kind },
           })
           if (result.error === undefined) {
             return { analyzerId: analyzerRowId, diagnostics: result.diagnostics }
@@ -378,21 +409,10 @@ export class AnalyzerRunner {
     return { analyzerId: null, diagnostics: [], error: `no-diagnostics: ${args.target}` }
   }
 
-  async executeReferences(args: {
-    db: Database
-    runId: number
-    nodeId: number
-    filePath: string
-    repoRoot: string
-    language: string
-    target: string
-    position: { line: number; character: number }
-  }): Promise<RunnerReferencesResult> {
-    const language = this.findLanguage(args.language)
-    if (language === undefined) {
-      return { analyzerId: null, locations: [], error: `unsupported-language: ${args.language}` }
-    }
-
+  private async executeReferencesLegacy(
+    args: RunnerArgsBase & { position: { line: number; character: number } },
+    language: RegistryLanguage,
+  ): Promise<RunnerReferencesResult> {
     const candidates = this.getCandidates(args.repoRoot, language, 'refs')
     if (candidates.length === 0) {
       return { analyzerId: null, locations: [], error: `no-analyzer: ${language.id}` }
@@ -529,11 +549,7 @@ export class AnalyzerRunner {
     )
   }
 
-  private getCandidates(
-    repoRoot: string,
-    language: RegistryLanguage,
-    capability: AnalyzerCapability,
-  ): ResolvedAnalyzer[] {
+  private getCandidates(repoRoot: string, language: RegistryLanguage, capability: AnalyzerCapability): ResolvedAnalyzer[] {
     return language.analyzers
       .filter(analyzer => analyzer.capabilities.includes(capability))
       .filter(analyzer => this.isAnalyzerEligible(analyzer, repoRoot))
@@ -546,12 +562,7 @@ export class AnalyzerRunner {
     return analyzer.required_files?.every(file => existsSync(`${repoRoot}/${file}`)) ?? true
   }
 
-  private ensureAnalyzerRow(
-    db: Database,
-    runId: number,
-    repoRoot: string,
-    resolved: ResolvedAnalyzer,
-  ): number {
+  private ensureAnalyzerRow(db: Database, runId: number, repoRoot: string, resolved: ResolvedAnalyzer): number {
     const cacheKey = this.makeAnalyzerCacheKey(runId, resolved.language.id, resolved.analyzer.id)
     const cached = this.analyzerRowCache.get(cacheKey)
     if (cached !== undefined) return cached
@@ -608,6 +619,41 @@ export class AnalyzerRunner {
       record.errorMessage ?? null,
       record.metadata !== undefined ? JSON.stringify(record.metadata) : null,
     )
+  }
+
+  private recordPluginAttempts(
+    db: Database,
+    runId: number,
+    nodeId: number,
+    languageId: string,
+    capability: AnalyzerCapability,
+    target: string,
+    repoRoot: string,
+    attempts: PluginExecutionAttempt[],
+  ): number | null {
+    let lastAnalyzerRowId: number | null = null
+    const language = this.findLanguage(languageId)
+    if (language === undefined) return null
+
+    for (const attempt of attempts) {
+      const analyzer = language.analyzers.find(candidate => candidate.id === attempt.analyzerId)
+      if (analyzer === undefined) continue
+      const analyzerRowId = this.ensureAnalyzerRow(db, runId, repoRoot, { language, analyzer })
+      this.recordAnalyzerRun(db, runId, {
+        analyzerId: analyzerRowId,
+        nodeId,
+        language: language.id,
+        capability,
+        status: attempt.status,
+        target,
+        durationMs: attempt.durationMs,
+        errorMessage: attempt.errorMessage,
+        metadata: attempt.metadata,
+      })
+      lastAnalyzerRowId = analyzerRowId
+    }
+
+    return lastAnalyzerRowId
   }
 
   private makeAnalyzerCacheKey(runId: number, languageId: string, analyzerId: string): string {

@@ -282,11 +282,48 @@ describe('SemanticQueryService definitions', () => {
       kind: 'Class',
       anchorLine: 1,
       anchorColumn: 13,
+      lowSignal: false,
     })
     expect(atoms[1]).toMatchObject({
       kind: 'Function',
       anchorLine: 10,
       anchorColumn: 9,
+      lowSignal: false,
     })
+  })
+
+  test('marks low-signal atoms from persisted metadata', () => {
+    const dbPath = makeTempDbPath('code-spider-atoms-low-signal')
+    const db = openDb(dbPath)
+
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-21T12:00:00Z', '2026-04-21T12:01:00Z', '/tmp/repo', 'abc1234', 'test')
+
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES (1, 1, 'unit', 'unit:src/a.ts', 'a.ts', 'src/a.ts', 'typescript', 0, 1)`
+    ).run()
+
+    db.query(
+      `INSERT INTO symbols (
+         id, run_id, node_id, symbol_key, name, kind, container_name, signature, range_json, selection_range_json, metadata_json
+       ) VALUES
+         (1, 1, 1, 'src/a.ts:map-callback', 'map() callback', 'Function', null, null, ?, ?, ?),
+         (2, 1, 1, 'src/a.ts:Exporter', 'Exporter', 'Class', null, null, ?, ?, null)`
+    ).run(
+      JSON.stringify({ start: { line: 4, character: 0 }, end: { line: 4, character: 20 } }),
+      JSON.stringify({ start: { line: 4, character: 0 }, end: { line: 4, character: 14 } }),
+      JSON.stringify({ signal: 'low' }),
+      JSON.stringify({ start: { line: 1, character: 0 }, end: { line: 3, character: 1 } }),
+      JSON.stringify({ start: { line: 1, character: 13 }, end: { line: 1, character: 21 } }),
+    )
+
+    const atoms = new SemanticQueryService(db, 1).findAtoms('unit:src/a.ts')
+
+    expect(atoms.map(atom => ({ name: atom.name, lowSignal: atom.lowSignal }))).toEqual([
+      { name: 'Exporter', lowSignal: false },
+      { name: 'map() callback', lowSignal: true },
+    ])
   })
 })

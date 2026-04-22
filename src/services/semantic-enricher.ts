@@ -85,6 +85,11 @@ export class SemanticEnricher {
 
         for (const sym of symbolResult.symbols) {
           const symbolKey = `${node.path}:${sym.name}`
+          const metadata = {
+            analyzer_id: symbolResult.analyzerId,
+            mode: symbolResult.mode ?? null,
+            signal: sym.signal ?? null,
+          }
           insertSymbol.run(
             runId,
             node.id,
@@ -95,10 +100,7 @@ export class SemanticEnricher {
             null,
             JSON.stringify(sym.range),
             sym.selectionRange !== undefined ? JSON.stringify(sym.selectionRange) : null,
-            JSON.stringify({
-              analyzer_id: symbolResult.analyzerId,
-              mode: symbolResult.mode ?? null,
-            }),
+            JSON.stringify(metadata),
           )
           symbolsAdded++
         }
