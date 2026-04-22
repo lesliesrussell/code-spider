@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { LspAdapter, normalizeDocumentSymbolResult } from './lsp'
+import { LspAdapter, applyInferredSelectionRanges, normalizeDocumentSymbolResult } from './lsp'
 
 const tempDirs: string[] = []
 
@@ -172,6 +172,25 @@ describe('normalizeDocumentSymbolResult', () => {
       },
       selectionRange: undefined,
     }])
+  })
+
+  test('infers selection ranges from source text when missing', () => {
+    const symbols = applyInferredSelectionRanges([{
+      name: 'ExampleService',
+      kind: 5,
+      kindName: 'Class',
+      containerName: undefined,
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 2, character: 1 },
+      },
+      selectionRange: undefined,
+    }], 'export class ExampleService {\n  runTask() {}\n}\n')
+
+    expect(symbols[0]?.selectionRange).toEqual({
+      start: { line: 0, character: 13 },
+      end: { line: 0, character: 27 },
+    })
   })
 })
 

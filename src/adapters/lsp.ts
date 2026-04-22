@@ -134,6 +134,35 @@ export function normalizeDocumentSymbolResult(result: unknown): LspSymbol[] {
   return symbols
 }
 
+function inferSelectionRange(
+  range: LspRange,
+  name: string,
+  sourceText?: string,
+): LspRange | undefined {
+  if (!sourceText || !name) return undefined
+
+  const lines = sourceText.split('\n')
+  const line = lines[range.start.line]
+  if (line === undefined) return undefined
+
+  const searchStart = Math.max(0, range.start.character)
+  const matchIndex = line.indexOf(name, searchStart)
+  if (matchIndex === -1) return undefined
+
+  return {
+    start: { line: range.start.line, character: matchIndex },
+    end: { line: range.start.line, character: matchIndex + name.length },
+  }
+}
+
+export function applyInferredSelectionRanges(symbols: LspSymbol[], sourceText?: string): LspSymbol[] {
+  return symbols.map(symbol => {
+    if (symbol.selectionRange !== undefined) return symbol
+    const inferred = inferSelectionRange(symbol.range, symbol.name, sourceText)
+    return inferred ? { ...symbol, selectionRange: inferred } : symbol
+  })
+}
+
 // Attempt real LSP communication via stdio JSON-RPC
 async function tryRealLspDocumentSymbols(
   filePath: string,
@@ -205,7 +234,7 @@ async function tryRealLspDocumentSymbols(
             textDocument: { uri }
           }})
         } else if (docSymbolsRequested && msg.id === 2) {
-          symbols.push(...normalizeDocumentSymbolResult(msg.result))
+          symbols.push(...applyInferredSelectionRanges(normalizeDocumentSymbolResult(msg.result), text))
           send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
           send({ jsonrpc: '2.0', method: 'exit', params: null })
           clearTimeout(timer)
@@ -224,7 +253,7 @@ async function tryRealLspDocumentSymbols(
       params: {
         processId: process.pid,
         rootUri: fileUri(repoRoot),
-        capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: false } } },
+        capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
         initializationOptions: {},
       }
     })
