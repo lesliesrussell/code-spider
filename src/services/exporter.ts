@@ -271,17 +271,11 @@ export class Exporter {
   }
 
   async exportInvestigation(investigationId: number, format: ExportFormat): Promise<string> {
-    const detail = this.invSvc.show(investigationId)
+    const detail = this.invSvc.showWithContext(investigationId)
     const freshness = await this.getFreshness()
 
     if (format === 'json') {
-      // Enrich nodes with stats
-      const enriched = detail.nodes.map(n => {
-        const node = this.nav.getNode(n.key)
-        const stats = node ? this.nav.getStats(node.id) : null
-        return { ...n, stats }
-      })
-      return JSON.stringify({ ...detail, freshness, nodes: enriched }, null, 2)
+      return JSON.stringify({ ...detail, freshness }, null, 2)
     }
 
     // Markdown
@@ -310,16 +304,36 @@ export class Exporter {
     if (detail.nodes.length > 0) {
       lines.push('## Nodes Visited')
       for (const n of detail.nodes) {
-        const node = this.nav.getNode(n.key)
-        const stats = node ? this.nav.getStats(node.id) : null
-        const statsStr = stats
-          ? `  score: ${node?.score.toFixed(2) ?? '?'}  loc: ${stats.loc}  churn: ${stats.churn}`
+        const statsStr = n.stats
+          ? `  score: ${n.score?.toFixed(2) ?? '?'}  loc: ${n.stats.loc}  churn: ${n.stats.churn}`
           : ''
         lines.push(`### ${n.label}  [${n.kind}]`)
         lines.push(`Key: \`${n.key}\`${statsStr}`)
+        if (n.summary) {
+          lines.push('')
+          lines.push(n.summary)
+        }
         if (n.note) {
           lines.push('')
           lines.push(`> ${n.note}`)
+        }
+        if (n.markdownContext.length > 0 || n.beadsContext.length > 0 || n.gitContext.length > 0) {
+          lines.push('')
+          lines.push('Context')
+          for (const section of n.markdownContext) {
+            const location = section.sectionPath ?? section.docPath ?? section.docLabel
+            lines.push(`- docs: ${section.docLabel} :: ${section.sectionTitle}${location ? ` (${location})` : ''}`)
+          }
+          for (const issue of n.beadsContext) {
+            const issueId = issue.issueId ?? issue.issueKey
+            const status = issue.status ? ` [${issue.status}]` : ''
+            lines.push(`- issue: ${issueId}${status} ${issue.title}`)
+          }
+          for (const entry of n.gitContext) {
+            const locator = entry.locator ? ` (${entry.locator})` : ''
+            const snippet = entry.snippet ? ` — ${entry.snippet}` : ''
+            lines.push(`- git: ${entry.source}${locator}${snippet}`)
+          }
         }
         lines.push('')
       }

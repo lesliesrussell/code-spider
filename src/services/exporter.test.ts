@@ -275,4 +275,72 @@ describe('Exporter freshness metadata', () => {
       artifacts: ['token stream', 'AST nodes', 'IR program', 'bytecode'],
     })
   })
+
+  test('exports investigations with curated markdown, issue, and git context', async () => {
+    const repoRoot = makeTempRepo('code-spider-exporter-investigation')
+    mkdirSync(join(repoRoot, 'src'), { recursive: true })
+    writeFileSync(join(repoRoot, 'src', 'main.ts'), 'export class Runner {}\n')
+    initGitRepo(repoRoot)
+    execSync('git add .', { cwd: repoRoot, stdio: 'ignore' })
+    execSync('git commit -m "init"', { cwd: repoRoot, stdio: 'ignore' })
+
+    const dbPath = makeTempDbPath('code-spider-exporter-investigation')
+    const db = openDb(dbPath)
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-22T10:00:00Z', '2026-04-22T10:02:00Z', repoRoot, 'abc1234', 'test')
+    db.query(
+      `INSERT INTO investigations (id, run_id, title, question, status, summary, created_at, updated_at)
+       VALUES (7, 1, 'Trace Runner', 'Why is Runner central?', 'open', 'Start with the entrypoint.', '2026-04-22T10:03:00Z', '2026-04-22T10:03:00Z')`
+    ).run()
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, summary, score, confidence, metadata_json)
+       VALUES
+         (1, 1, 'unit', 'unit:src/main.ts', 'main.ts', 'src/main.ts', 'TypeScript', 'Top-level runner orchestration.', 0.9, 1, NULL),
+         (2, 1, 'doc', 'doc:README.md', 'README.md', 'README.md', 'Markdown', 'Repository guide', 0, 0.8, NULL),
+         (3, 1, 'doc_section', 'doc_section:README.md#overview', 'Overview', 'README.md', 'Markdown', 'Explains the runner role', 0, 0.8, NULL),
+         (4, 1, 'issue', 'issue:code-spider-8jw', 'Integrate context nodes into investigations', 'code-spider-8jw', NULL, 'Tracks this feature', 0.9, 0.9, '{"status":"in_progress"}')`
+    ).run()
+    db.query(
+      `INSERT INTO stats (run_id, node_id, metric, value) VALUES
+         (1, 1, 'loc', 25),
+         (1, 1, 'churn', 4),
+         (1, 1, 'recency', 1)`
+    ).run()
+    db.query(
+      `INSERT INTO investigation_nodes (investigation_id, node_id, note)
+       VALUES (7, 1, 'Investigate the main control path')`
+    ).run()
+    db.query(
+      `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, weight) VALUES
+         (1, 3, 1, 'mentions', 1),
+         (1, 2, 3, 'contains', 1),
+         (1, 4, 1, 'tracked-by', 2)`
+    ).run()
+    db.query(
+      `INSERT INTO evidence (run_id, node_id, kind, source, locator, snippet, score)
+       VALUES (1, 1, 'git', 'abc1234', 'src/main.ts', 'initial runner implementation', 1.0)`
+    ).run()
+
+    const md = await new Exporter(db, 1).exportInvestigation(7, 'md')
+    const jsonOutput = await new Exporter(db, 1).exportInvestigation(7, 'json')
+    const payload = JSON.parse(jsonOutput) as {
+      nodes: Array<{
+        markdownContext: Array<{ docLabel: string; sectionTitle: string }>
+        beadsContext: Array<{ issueId: string | null; title: string }>
+        gitContext: Array<{ source: string; snippet: string | null }>
+      }>
+    }
+
+    expect(md).toContain('Context')
+    expect(md).toContain('docs: README.md :: Overview (README.md)')
+    expect(md).toContain('issue: code-spider-8jw [in_progress] Integrate context nodes into investigations')
+    expect(md).toContain('git: abc1234 (src/main.ts) — initial runner implementation')
+    expect(payload.nodes[0]?.markdownContext[0]?.docLabel).toBe('README.md')
+    expect(payload.nodes[0]?.markdownContext[0]?.sectionTitle).toBe('Overview')
+    expect(payload.nodes[0]?.beadsContext[0]?.issueId).toBe('code-spider-8jw')
+    expect(payload.nodes[0]?.beadsContext[0]?.title).toBe('Integrate context nodes into investigations')
+    expect(payload.nodes[0]?.gitContext[0]?.source).toBe('abc1234')
+    expect(payload.nodes[0]?.gitContext[0]?.snippet).toBe('initial runner implementation')
+  })
 })

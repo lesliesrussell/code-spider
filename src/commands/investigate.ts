@@ -55,7 +55,7 @@ export default async function run(ctx: CliContext): Promise<void> {
     const id = parseInt(idStr, 10)
     let detail
     try {
-      detail = svc.show(id)
+      detail = svc.showWithContext(id)
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err))
       process.exit(1)
@@ -77,8 +77,28 @@ export default async function run(ctx: CliContext): Promise<void> {
     if (detail.nodes.length > 0) {
       console.log(`Nodes (${detail.nodes.length})`)
       for (const n of detail.nodes) {
+        const statsStr = n.stats
+          ? `  score:${n.score?.toFixed(2) ?? '?'} loc:${n.stats.loc} churn:${n.stats.churn}`
+          : ''
         const noteStr = n.note ? `  — ${n.note}` : ''
-        console.log(`  [${n.kind}] ${n.key}${noteStr}`)
+        console.log(`  [${n.kind}] ${n.key}${statsStr}${noteStr}`)
+        if (n.summary) {
+          console.log(`      ${n.summary}`)
+        }
+        for (const section of n.markdownContext) {
+          const location = section.sectionPath ?? section.docPath ?? section.docLabel
+          console.log(`      doc: ${section.docLabel} :: ${section.sectionTitle}${location ? ` (${location})` : ''}`)
+        }
+        for (const issue of n.beadsContext) {
+          const issueId = issue.issueId ?? issue.issueKey
+          const status = issue.status ? ` [${issue.status}]` : ''
+          console.log(`      issue: ${issueId}${status} ${issue.title}`)
+        }
+        for (const entry of n.gitContext) {
+          const locator = entry.locator ? ` (${entry.locator})` : ''
+          const snippet = entry.snippet ? ` — ${entry.snippet}` : ''
+          console.log(`      git: ${entry.source}${locator}${snippet}`)
+        }
       }
       console.log()
     } else {

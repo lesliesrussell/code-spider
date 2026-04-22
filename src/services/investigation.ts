@@ -1,12 +1,43 @@
 import { Database } from 'bun:sqlite'
+import {
+  Navigator,
+  type BeadsContextRow,
+  type EvidenceRow,
+  type MarkdownContextRow,
+  type NodeStats,
+} from './navigator'
 
 export interface InvestigationDetail {
   id: number
+  runId: number | null
   question: string
   status: string
   summary: string | null
   createdAt: string
   nodes: { key: string; label: string; kind: string; note: string | null }[]
+}
+
+export interface InvestigationNodeDetail {
+  key: string
+  label: string
+  kind: string
+  note: string | null
+  summary: string | null
+  score: number | null
+  stats: NodeStats | null
+  gitContext: EvidenceRow[]
+  markdownContext: MarkdownContextRow[]
+  beadsContext: BeadsContextRow[]
+}
+
+export interface InvestigationDetailWithContext {
+  id: number
+  runId: number | null
+  question: string
+  status: string
+  summary: string | null
+  createdAt: string
+  nodes: InvestigationNodeDetail[]
 }
 
 export interface InvestigationSummary {
@@ -37,6 +68,27 @@ interface InvNodeRow {
 
 export class InvestigationService {
   constructor(private db: Database) {}
+
+  private getInvestigationRow(investigationId: number): InvestigationRow {
+    const inv = this.db.query<InvestigationRow, [number]>(
+      `SELECT * FROM investigations WHERE id=? LIMIT 1`
+    ).get(investigationId)
+
+    if (!inv) {
+      throw new Error(`Investigation not found: ${investigationId}`)
+    }
+
+    return inv
+  }
+
+  private getInvestigationNodes(investigationId: number): InvNodeRow[] {
+    return this.db.query<InvNodeRow, [number]>(
+      `SELECT n.key, n.label, n.kind, inv_n.note
+       FROM investigation_nodes inv_n
+       JOIN nodes n ON n.id = inv_n.node_id
+       WHERE inv_n.investigation_id=?`
+    ).all(investigationId)
+  }
 
   start(question: string, runId?: number): number {
     const now = new Date().toISOString()
@@ -97,28 +149,52 @@ export class InvestigationService {
   }
 
   show(investigationId: number): InvestigationDetail {
-    const inv = this.db.query<InvestigationRow, [number]>(
-      `SELECT * FROM investigations WHERE id=? LIMIT 1`
-    ).get(investigationId)
-
-    if (!inv) {
-      throw new Error(`Investigation not found: ${investigationId}`)
-    }
-
-    const nodes = this.db.query<InvNodeRow, [number]>(
-      `SELECT n.key, n.label, n.kind, inv_n.note
-       FROM investigation_nodes inv_n
-       JOIN nodes n ON n.id = inv_n.node_id
-       WHERE inv_n.investigation_id=?`
-    ).all(investigationId)
+    const inv = this.getInvestigationRow(investigationId)
+    const nodes = this.getInvestigationNodes(investigationId)
 
     return {
       id: inv.id,
+      runId: inv.run_id,
       question: inv.question,
       status: inv.status,
       summary: inv.summary,
       createdAt: inv.created_at,
       nodes,
+    }
+  }
+
+  showWithContext(investigationId: number): InvestigationDetailWithContext {
+    const detail = this.show(investigationId)
+    if (detail.runId === null) {
+      return {
+        ...detail,
+        nodes: detail.nodes.map(node => ({
+          ...node,
+          summary: null,
+          score: null,
+          stats: null,
+          gitContext: [],
+          markdownContext: [],
+          beadsContext: [],
+        })),
+      }
+    }
+
+    const nav = new Navigator(this.db, detail.runId)
+    return {
+      ...detail,
+      nodes: detail.nodes.map(node => {
+        const resolved = nav.getNode(node.key)
+        return {
+          ...node,
+          summary: resolved?.summary ?? null,
+          score: resolved?.score ?? null,
+          stats: resolved ? nav.getStats(resolved.id) : null,
+          gitContext: resolved ? nav.getGitContext(resolved.id, 3) : [],
+          markdownContext: resolved ? nav.getMarkdownContext(resolved.id, 5) : [],
+          beadsContext: resolved ? nav.getBeadsContext(resolved.id, 5) : [],
+        }
+      }),
     }
   }
 
