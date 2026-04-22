@@ -121,6 +121,29 @@ function printLastRunCoverage(
   printCoverageGroup('Last run on-demand activity', onDemandCoverage)
 }
 
+function printContextEnrichers(
+  enrichers: Array<{
+    name: string
+    available: boolean
+    observed: boolean
+    details: string
+  }>
+): void {
+  console.log('Context enrichers')
+  if (enrichers.length === 0) {
+    console.log('  (none)')
+    console.log()
+    return
+  }
+
+  for (const enricher of enrichers) {
+    const available = enricher.available ? 'available' : 'unavailable'
+    const observed = enricher.observed ? 'observed' : 'not observed'
+    console.log(`  ${enricher.name.padEnd(10)}  [${available}, ${observed}]  ${enricher.details}`)
+  }
+  console.log()
+}
+
 export default async function run(ctx: CliContext): Promise<void> {
   const scope = ctx.args[0] // 'semantic' | 'repo' | 'perf' | undefined
   const service = new DoctorService()
@@ -141,6 +164,7 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   printRegistrySummary(report.detectedLanguages, report.selectedAnalyzers)
   printLastRunCoverage(report.lastRunCoverage)
+  printContextEnrichers(report.contextEnrichers)
 
   console.log('Analysis fidelity for this repo')
   printFidelity(report.fidelity)

@@ -53,6 +53,20 @@ describe('doctor command', () => {
         semanticRefs: true,
         diagnostics: true,
       },
+      contextEnrichers: [
+        {
+          name: 'git',
+          available: true,
+          observed: true,
+          details: 'evidence:3, cochange:2',
+        },
+        {
+          name: 'markdown',
+          available: true,
+          observed: false,
+          details: 'docs:0, sections:0, mentions:0',
+        },
+      ],
     })
 
     await runDoctor({
@@ -66,5 +80,8 @@ describe('doctor command', () => {
     expect(lines).toContain('  ✓ symbols  10/12 successful  [success:10, no_result:2]')
     expect(lines).toContain('Last run on-demand activity')
     expect(lines).toContain('  ✓ refs  3 queries run  [success:3]')
+    expect(lines).toContain('Context enrichers')
+    expect(lines).toContain('  git         [available, observed]  evidence:3, cochange:2')
+    expect(lines).toContain('  markdown    [available, not observed]  docs:0, sections:0, mentions:0')
   })
 })

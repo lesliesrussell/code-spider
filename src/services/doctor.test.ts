@@ -46,6 +46,26 @@ describe('DoctorService registry reporting', () => {
     expect(report.fidelity.symbolNavigation).toBe(true)
     expect(report.fidelity.semanticRefs).toBe(true)
     expect(report.fidelity.diagnostics).toBe(true)
+    expect(report.contextEnrichers).toEqual([
+      {
+        name: 'git',
+        available: false,
+        observed: false,
+        details: 'git unavailable',
+      },
+      {
+        name: 'markdown',
+        available: false,
+        observed: false,
+        details: 'no markdown files detected',
+      },
+      {
+        name: 'beads',
+        available: false,
+        observed: false,
+        details: 'no beads workspace or bd command unavailable',
+      },
+    ])
   })
 
   test('falls back when no analyzers match the repo', async () => {
@@ -127,6 +147,26 @@ describe('DoctorService registry reporting', () => {
     expect(report.fidelity.symbolNavigation).toBe(true)
     expect(report.fidelity.semanticRefs).toBe(true)
     expect(report.fidelity.diagnostics).toBe(false)
+    expect(report.contextEnrichers).toEqual([
+      {
+        name: 'git',
+        available: false,
+        observed: false,
+        details: 'evidence:0, cochange:0',
+      },
+      {
+        name: 'markdown',
+        available: false,
+        observed: false,
+        details: 'docs:0, sections:0, mentions:0',
+      },
+      {
+        name: 'beads',
+        available: false,
+        observed: false,
+        details: 'issues:0, tracked:0, deps:0',
+      },
+    ])
   })
 
   test('falls back to available refs capability when the last run never attempted refs', async () => {
@@ -180,5 +220,61 @@ describe('DoctorService registry reporting', () => {
       },
     ])
     expect(report.fidelity.semanticRefs).toBe(true)
+  })
+
+  test('reports observed context enrichers from the latest run', async () => {
+    const repoRoot = makeTempRepo('code-spider-doctor-context')
+    mkdirSync(join(repoRoot, 'src'), { recursive: true })
+    writeFileSync(join(repoRoot, 'README.md'), '# fixture\n')
+    writeFileSync(join(repoRoot, 'src', 'index.ts'), 'export class Runner {}\n')
+
+    const dbPath = join(repoRoot, '.code-spider', 'index.db')
+    const db = openDb(dbPath)
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-21T12:00:00Z', '2026-04-21T12:01:00Z', repoRoot, 'abc1234', 'test')
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES
+         (1, 1, 'unit', 'unit:src/index.ts', 'index.ts', 'src/index.ts', 'TypeScript', 0, 1),
+         (2, 1, 'doc', 'doc:README.md', 'README.md', 'README.md', 'Markdown', 0, 1),
+         (3, 1, 'doc_section', 'doc_section:README.md#overview', 'Overview', 'README.md', 'Markdown', 0, 1),
+         (4, 1, 'issue', 'issue:code-spider-4g0', 'Report context enrichers in doctor', 'code-spider-4g0', null, 0, 1)`
+    ).run()
+    db.query(
+      `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, weight)
+       VALUES
+         (1, 3, 1, 'mentions', 1),
+         (1, 4, 1, 'tracked-by', 1),
+         (1, 4, 4, 'depends-on', 1),
+         (1, 1, 1, 'changed-with', 1)`
+    ).run()
+    db.query(
+      `INSERT INTO evidence (run_id, node_id, kind, source, locator, snippet, score)
+       VALUES (1, 1, 'git', 'abc1234', 'src/index.ts', 'initial commit', 1.0)`
+    ).run()
+
+    const report = await new DoctorService().run(repoRoot, dbPath)
+
+    expect(report.contextEnrichers).toEqual([
+      {
+        name: 'git',
+        available: false,
+        observed: true,
+        details: 'evidence:1, cochange:1',
+      },
+      {
+        name: 'markdown',
+        available: true,
+        observed: true,
+        details: 'docs:1, sections:1, mentions:1',
+      },
+      {
+        name: 'beads',
+        available: false,
+        observed: true,
+        details: 'issues:1, tracked:1, deps:1',
+      },
+    ])
   })
 })

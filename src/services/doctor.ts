@@ -46,6 +46,12 @@ export interface DoctorReport {
   }>
   checks: Check[]
   fidelity: FidelityReport
+  contextEnrichers: Array<{
+    name: 'git' | 'markdown' | 'beads'
+    available: boolean
+    observed: boolean
+    details: string
+  }>
 }
 
 interface RunRow {
@@ -149,6 +155,10 @@ function detectLanguages(repoRoot: string): RegistryLanguage[] {
     const hasManifest = manifests.some(file => fileSet.has(file))
     return hasExtension || hasManifest
   })
+}
+
+function hasMarkdownFiles(repoRoot: string): boolean {
+  return walkRepoFiles(repoRoot).some(file => file.endsWith('.md') || file.endsWith('.mdx'))
 }
 
 function isAnalyzerEligible(repoRoot: string, analyzer: RegistryAnalyzer): boolean {
@@ -344,6 +354,101 @@ function hasSemanticRefsFidelity(
   return availableCapabilities.has('refs')
 }
 
+function summarizeContextEnrichers(
+  repoRoot: string,
+  db: Database | null,
+  lastRunId: number | null,
+  gitAvailable: boolean,
+): DoctorReport['contextEnrichers'] {
+  const markdownAvailable = hasMarkdownFiles(repoRoot)
+  const beadsAvailable = existsSync(join(repoRoot, '.beads')) && tryExec('bd --version') !== null
+
+  if (db === null || lastRunId === null) {
+    return [
+      {
+        name: 'git',
+        available: gitAvailable,
+        observed: false,
+        details: gitAvailable ? 'no completed run yet' : 'git unavailable',
+      },
+      {
+        name: 'markdown',
+        available: markdownAvailable,
+        observed: false,
+        details: markdownAvailable ? 'no completed run yet' : 'no markdown files detected',
+      },
+      {
+        name: 'beads',
+        available: beadsAvailable,
+        observed: false,
+        details: beadsAvailable ? 'no completed run yet' : 'no beads workspace or bd command unavailable',
+      },
+    ]
+  }
+
+  const gitEvidence = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM evidence
+     WHERE run_id=? AND kind='git'`
+  ).get(lastRunId)?.count ?? 0
+  const cochangeEdges = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM edges
+     WHERE run_id=? AND kind='changed-with'`
+  ).get(lastRunId)?.count ?? 0
+  const docs = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM nodes
+     WHERE run_id=? AND kind='doc'`
+  ).get(lastRunId)?.count ?? 0
+  const sections = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM nodes
+     WHERE run_id=? AND kind='doc_section'`
+  ).get(lastRunId)?.count ?? 0
+  const mentions = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM edges
+     WHERE run_id=? AND kind='mentions'`
+  ).get(lastRunId)?.count ?? 0
+  const issues = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM nodes
+     WHERE run_id=? AND kind='issue'`
+  ).get(lastRunId)?.count ?? 0
+  const trackedBy = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM edges
+     WHERE run_id=? AND kind='tracked-by'`
+  ).get(lastRunId)?.count ?? 0
+  const issueDeps = db.query<CountRow, [number]>(
+    `SELECT COUNT(*) as count
+     FROM edges
+     WHERE run_id=? AND kind='depends-on'`
+  ).get(lastRunId)?.count ?? 0
+
+  return [
+    {
+      name: 'git',
+      available: gitAvailable,
+      observed: gitEvidence > 0 || cochangeEdges > 0,
+      details: `evidence:${gitEvidence}, cochange:${cochangeEdges}`,
+    },
+    {
+      name: 'markdown',
+      available: markdownAvailable,
+      observed: docs > 0 || sections > 0 || mentions > 0,
+      details: `docs:${docs}, sections:${sections}, mentions:${mentions}`,
+    },
+    {
+      name: 'beads',
+      available: beadsAvailable,
+      observed: issues > 0 || trackedBy > 0 || issueDeps > 0,
+      details: `issues:${issues}, tracked:${trackedBy}, deps:${issueDeps}`,
+    },
+  ]
+}
+
 export class DoctorService {
   async run(repoRoot: string, dbPath: string, _scope?: string): Promise<DoctorReport> {
     const gitCheck = checkGit(repoRoot)
@@ -353,6 +458,12 @@ export class DoctorService {
     const registryChecks = checkRegistryAnalyzers(repoRoot, detectedLanguages)
     const repoSizeCheck = checkRepoSize(repoRoot, db, lastRunId)
     const lastRunCoverage = summarizeLastRunCoverage(db, lastRunId)
+    const contextEnrichers = summarizeContextEnrichers(
+      repoRoot,
+      db,
+      lastRunId,
+      gitCheck.status === 'pass',
+    )
 
     const checks: Check[] = [
       gitCheck,
@@ -388,6 +499,7 @@ export class DoctorService {
       lastRunCoverage,
       checks,
       fidelity,
+      contextEnrichers,
     }
   }
 }
