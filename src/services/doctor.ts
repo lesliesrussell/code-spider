@@ -328,6 +328,15 @@ function summarizeLastRunCoverage(db: Database | null, lastRunId: number | null)
   }))
 }
 
+function hasSemanticRefsFidelity(
+  coverage: DoctorReport['lastRunCoverage'],
+  availableCapabilities: Set<AnalyzerCapability>,
+): boolean {
+  const refsCoverage = coverage.find(item => item.capability === 'refs')
+  if (refsCoverage !== undefined) return refsCoverage.succeeded
+  return availableCapabilities.has('refs')
+}
+
 export class DoctorService {
   async run(repoRoot: string, dbPath: string, _scope?: string): Promise<DoctorReport> {
     const gitCheck = checkGit(repoRoot)
@@ -359,7 +368,7 @@ export class DoctorService {
       hotspot: gitCheck.status === 'pass',
       flowHeuristics: rgCheck.status === 'pass',
       symbolNavigation: effectiveCapabilities.has('symbols') || effectiveCapabilities.has('defs'),
-      semanticRefs: effectiveCapabilities.has('refs'),
+      semanticRefs: hasSemanticRefsFidelity(lastRunCoverage, registryChecks.capabilities),
       diagnostics: effectiveCapabilities.has('diagnostics'),
     }
 
