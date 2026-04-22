@@ -67,12 +67,20 @@ function printRegistrySummary(
   console.log()
 }
 
-function printLastRunCoverage(
-  coverage: Array<{ capability: string; succeeded: boolean; successCount: number; attemptedCount: number; statuses: Record<string, number> }>
+function printCoverageGroup(
+  title: string,
+  coverage: Array<{
+    capability: string
+    mode: 'sweep' | 'on-demand'
+    succeeded: boolean
+    successCount: number
+    attemptedCount: number
+    statuses: Record<string, number>
+  }>,
 ): void {
-  console.log('Last run coverage')
+  console.log(title)
   if (coverage.length === 0) {
-    console.log('  (no analyzer execution data from the latest run)')
+    console.log('  (none)')
     console.log()
     return
   }
@@ -82,9 +90,35 @@ function printLastRunCoverage(
     const statusSummary = Object.entries(item.statuses)
       .map(([status, count]) => `${status}:${count}`)
       .join(', ')
-    console.log(`  ${icon} ${item.capability}  ${item.successCount}/${item.attemptedCount} successful  [${statusSummary}]`)
+    const summary = item.mode === 'on-demand'
+      ? `${item.attemptedCount} queries run`
+      : `${item.successCount}/${item.attemptedCount} successful`
+    console.log(`  ${icon} ${item.capability}  ${summary}  [${statusSummary}]`)
   }
   console.log()
+}
+
+function printLastRunCoverage(
+  coverage: Array<{
+    capability: string
+    mode: 'sweep' | 'on-demand'
+    succeeded: boolean
+    successCount: number
+    attemptedCount: number
+    statuses: Record<string, number>
+  }>
+): void {
+  if (coverage.length === 0) {
+    console.log('Last run analyzer activity')
+    console.log('  (no analyzer execution data from the latest run)')
+    console.log()
+    return
+  }
+
+  const sweepCoverage = coverage.filter(item => item.mode === 'sweep')
+  const onDemandCoverage = coverage.filter(item => item.mode === 'on-demand')
+  printCoverageGroup('Last run sweep coverage', sweepCoverage)
+  printCoverageGroup('Last run on-demand activity', onDemandCoverage)
 }
 
 export default async function run(ctx: CliContext): Promise<void> {

@@ -38,6 +38,7 @@ export interface DoctorReport {
   }>
   lastRunCoverage: Array<{
     capability: AnalyzerCapability
+    mode: 'sweep' | 'on-demand'
     succeeded: boolean
     successCount: number
     attemptedCount: number
@@ -61,6 +62,11 @@ interface AnalyzerRunCoverageRow {
   capability: AnalyzerCapability
   status: string
   count: number
+}
+
+function coverageModeForCapability(capability: AnalyzerCapability): 'sweep' | 'on-demand' {
+  if (capability === 'refs') return 'on-demand'
+  return 'sweep'
 }
 
 function tryExec(cmd: string): string | null {
@@ -321,6 +327,7 @@ function summarizeLastRunCoverage(db: Database | null, lastRunId: number | null)
 
   return [...byCapability.entries()].map(([capability, summary]) => ({
     capability,
+    mode: coverageModeForCapability(capability),
     succeeded: summary.successCount > 0,
     successCount: summary.successCount,
     attemptedCount: summary.attemptedCount,

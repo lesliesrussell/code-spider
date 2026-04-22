@@ -101,6 +101,7 @@ describe('DoctorService registry reporting', () => {
     expect(report.lastRunCoverage).toEqual([
       {
         capability: 'diagnostics',
+        mode: 'sweep',
         succeeded: false,
         successCount: 0,
         attemptedCount: 1,
@@ -108,6 +109,7 @@ describe('DoctorService registry reporting', () => {
       },
       {
         capability: 'refs',
+        mode: 'on-demand',
         succeeded: true,
         successCount: 1,
         attemptedCount: 1,
@@ -115,6 +117,7 @@ describe('DoctorService registry reporting', () => {
       },
       {
         capability: 'symbols',
+        mode: 'sweep',
         succeeded: true,
         successCount: 1,
         attemptedCount: 1,
@@ -161,6 +164,7 @@ describe('DoctorService registry reporting', () => {
     expect(report.lastRunCoverage).toEqual([
       {
         capability: 'diagnostics',
+        mode: 'sweep',
         succeeded: true,
         successCount: 1,
         attemptedCount: 1,
@@ -168,6 +172,7 @@ describe('DoctorService registry reporting', () => {
       },
       {
         capability: 'symbols',
+        mode: 'sweep',
         succeeded: true,
         successCount: 1,
         attemptedCount: 1,
