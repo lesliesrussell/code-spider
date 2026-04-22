@@ -350,11 +350,11 @@ Output rule:
 
 Should report context enrichers alongside semantic analyzers.
 
-Eventually:
+Current behavior:
 
-- markdown enrichment available/running
-- git enrichment available/running
-- beads enrichment available/running
+- markdown enrichment available/observed
+- git enrichment available/observed
+- beads enrichment available/observed
 
 ## Schema Direction
 

@@ -10,6 +10,7 @@ It indexes a repo into SQLite, then gives you a fast structural and semantic map
 - definitions and references
 - atom-level symbol listings inside a file
 - analyzer coverage reporting through `doctor`
+- curated context from git, markdown, and beads
 
 ## Install
 
@@ -113,6 +114,7 @@ Investigation and reporting:
 code-spider investigate
 code-spider investigate start "How does indexing work?"
 code-spider investigate show 1
+code-spider export report 1
 code-spider export report repo:.
 ```
 
@@ -156,6 +158,7 @@ It is useful for:
 - surfacing hot or central files before making changes
 - seeing whether a repo is mostly source or mostly generated noise
 - getting a lightweight semantic map without opening an IDE
+- connecting code to recent changes, linked docs, and active work
 - exporting a compact report for another human or agent
 
 It is not yet a full replacement for IDE-grade cross-language code intelligence.
@@ -179,6 +182,7 @@ Coverage depends on:
 Use `doctor` to see both:
 - selected analyzers from the registry
 - last-run analyzer coverage from `analyzer_runs`
+- context enricher availability and observed latest-run results for `git`, `markdown`, and `beads`
 
 Example:
 
@@ -191,16 +195,33 @@ Important details:
 - `defs` uses indexed symbols from the latest run
 - `refs` uses analyzer-backed references when available and falls back to indexed symbol locations
 - `atoms` lists indexed symbols inside a unit
-- `doctor` reports actual last-run coverage when semantic indexing has been run
+- `doctor` separates sweep coverage from on-demand activity, so `refs` is reported as query activity rather than repo-wide coverage
+- `doctor` reports context enrichers with explicit `available` versus `observed` status
 
 If you have not run semantic indexing yet, `doctor` falls back to showing what analyzers are available rather than what actually ran.
+
+## Context Layer
+
+`code-spider` now attaches curated context to code nodes from three non-code sources:
+
+- `git`: recent rationale snippets, recency, churn, and co-change edges
+- `markdown`: linked `doc` and `doc_section` nodes plus explicit mentions into code
+- `beads`: issue nodes, issue dependencies, and explicit issue-to-code tracking edges
+
+That context is surfaced selectively:
+
+- `show` prints explicit `Git Context`, `Docs Context`, and `Tracked Issues` sections for a node
+- `related` uses shared docs, shared issues, co-change history, flows, and freshness-aware ranking, and shows typed signal labels in output
+- `investigate show` enriches attached nodes with linked docs, issues, and git rationale
+- `export report` folds the same curated context into node and investigation reports
 
 ## Current Limitations
 
 Some commands are still heuristic or partial:
-- `related` is currently a scored neighbor query based on shared symbols, zone proximity, and flow membership
+- `related` is still a scored neighbor query, even though it now includes doc links, issue links, co-change history, flow membership, and freshness-aware ranking
 - `atoms` depends on the quality of the underlying document symbols
 - diagnostics coverage is real now, but still depends heavily on installed analyzers
 - references are strongest for languages with a working LSP path
+- markdown and beads context are strongest when they contain explicit file or node references; weak prose is intentionally filtered out
 
 The CLI is installed through Bun. It is not a plain Node/npm CLI yet because the runtime still depends on Bun APIs.
