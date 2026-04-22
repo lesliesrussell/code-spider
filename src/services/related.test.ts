@@ -188,4 +188,48 @@ describe('RelatedService', () => {
     expect(related[0]?.signals).toContain('issues')
     expect(related[0]?.reasons.some(reason => reason.includes('recently touched (1d)'))).toBe(true)
   })
+
+  test('filters callback-shaped and generic local symbols from shared overlap reasons', async () => {
+    const dbPath = makeTempDbPath('code-spider-related-low-signal')
+    const db = openDb(dbPath)
+
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-21T12:00:00Z', '2026-04-21T12:01:00Z', '/tmp/repo', 'abc1234', 'test')
+
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES
+         (1, 1, 'zone', 'zone:src', 'src', 'src', null, 0.8, 1),
+         (2, 1, 'unit', 'unit:src/exporter.ts', 'exporter.ts', 'src/exporter.ts', 'TypeScript', 0.7, 1),
+         (3, 1, 'unit', 'unit:src/related.ts', 'related.ts', 'src/related.ts', 'TypeScript', 0.6, 1)`
+    ).run()
+
+    db.query(
+      `INSERT INTO stats (run_id, node_id, metric, value)
+       VALUES
+         (1, 2, 'loc', 10), (1, 2, 'churn', 1), (1, 2, 'recency', 1),
+         (1, 3, 'loc', 12), (1, 3, 'churn', 1), (1, 3, 'recency', 1)`
+    ).run()
+
+    db.query(
+      `INSERT INTO symbols (
+         id, run_id, node_id, symbol_key, name, kind, container_name, signature, range_json, selection_range_json, metadata_json
+       ) VALUES
+         (1, 1, 2, 'src/exporter.ts:Exporter', 'Exporter', 'Class', null, null, null, null, null),
+         (2, 1, 3, 'src/related.ts:Exporter', 'Exporter', 'Class', null, null, null, null, null),
+         (3, 1, 2, 'src/exporter.ts:map() callback', 'map() callback', 'Function', null, null, null, null, null),
+         (4, 1, 3, 'src/related.ts:map() callback', 'map() callback', 'Function', null, null, null, null, null),
+         (5, 1, 2, 'src/exporter.ts:item', 'item', 'Constant', null, null, null, null, null),
+         (6, 1, 3, 'src/related.ts:item', 'item', 'Constant', null, null, null, null, null)`
+    ).run()
+
+    const related = await new RelatedService(db, 1, '/tmp/repo').getRelated('unit:src/exporter.ts', 5)
+
+    expect(related[0]?.key).toBe('unit:src/related.ts')
+    expect(related[0]?.reasons).toContain('1 shared symbols')
+    expect(related[0]?.reasons.some(reason => reason.includes('shared: Exporter'))).toBe(true)
+    expect(related[0]?.reasons.some(reason => reason.includes('map() callback'))).toBe(false)
+    expect(related[0]?.reasons.some(reason => reason.includes('item'))).toBe(false)
+  })
 })

@@ -56,6 +56,53 @@ interface SharedIssueRow {
   issue_weight: number
 }
 
+const LOW_SIGNAL_SYMBOL_NAMES = [
+  'args',
+  'child',
+  'children',
+  'detail',
+  'details',
+  'edge',
+  'edges',
+  'entry',
+  'evidence',
+  'file',
+  'files',
+  'flow',
+  'flows',
+  'issue',
+  'issueid',
+  'item',
+  'items',
+  'key',
+  'kind',
+  'label',
+  'line',
+  'locator',
+  'message',
+  'name',
+  'node',
+  'nodes',
+  'path',
+  'reason',
+  'result',
+  'results',
+  'row',
+  'rows',
+  'section',
+  'sections',
+  'signal',
+  'signals',
+  'snippet',
+  'stats',
+  'status',
+  'symbol',
+  'symbols',
+  'value',
+] as const
+
+const LOW_SIGNAL_SYMBOL_PLACEHOLDERS = LOW_SIGNAL_SYMBOL_NAMES.map(() => '?').join(', ')
+
 function zoneFromPath(path: string | null): string | null {
   if (!path) return null
   const [zone] = path.split('/')
@@ -173,11 +220,17 @@ export class RelatedService {
          AND other.id != base.node_id
          AND other.kind = 'unit'
          AND length(shared.name) >= 4
-         AND shared.kind IN ('Class', 'Interface', 'Function', 'Method', 'Variable', 'Constant')
+         AND shared.kind IN ('Class', 'Interface', 'Function', 'Method', 'Constant')
+         AND shared.name NOT LIKE '% %'
+         AND shared.name NOT LIKE '%(%'
+         AND shared.name NOT LIKE '%.%'
+         AND shared.name NOT LIKE '%[%'
+         AND shared.name NOT LIKE '%]%'
+         AND lower(shared.name) NOT IN (` + LOW_SIGNAL_SYMBOL_PLACEHOLDERS + `)
        GROUP BY other.id, other.key, other.label, other.path
        ORDER BY shared_count DESC, other.path ASC
        LIMIT ?`
-    ).all(this.runId, node.id, limit * 3)
+    ).all(this.runId, node.id, ...LOW_SIGNAL_SYMBOL_NAMES, limit * 3)
 
     for (const row of overlaps) {
       const sample = (row.sample_names ?? '').split(',').filter(Boolean).slice(0, 3)
