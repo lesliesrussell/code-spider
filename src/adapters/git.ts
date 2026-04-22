@@ -22,6 +22,18 @@ export class GitAdapter {
     }
   }
 
+  async isDirty(): Promise<boolean | null> {
+    try {
+      const output = execSync(`git -C ${JSON.stringify(this.root)} status --porcelain`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      return output.trim() !== ''
+    } catch {
+      return null
+    }
+  }
+
   async getChurn(maxFiles = 500): Promise<Map<string, number>> {
     const churnMap = new Map<string, number>()
     try {

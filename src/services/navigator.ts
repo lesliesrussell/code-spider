@@ -18,6 +18,11 @@ export interface NodeStats {
   recency: number  // days since last commit (999 = unknown)
 }
 
+export interface RiskSignals {
+  diagnosticCount: number
+  edgeCount: number
+}
+
 export interface EvidenceRow {
   kind: string
   source: string
@@ -82,6 +87,23 @@ export class Navigator {
     return this.db.query<EvidenceRow, [number, number, number]>(
       'SELECT kind, source, locator, snippet, score FROM evidence WHERE run_id=? AND node_id=? ORDER BY score DESC LIMIT ?'
     ).all(this.runId, nodeId, limit)
+  }
+
+  getRiskSignals(nodeId: number): RiskSignals {
+    const diagnosticRow = this.db.query<{ cnt: number }, [number, number]>(
+      'SELECT COUNT(*) as cnt FROM diagnostics WHERE run_id=? AND node_id=?'
+    ).get(this.runId, nodeId)
+
+    const edgeRow = this.db.query<{ cnt: number }, [number, number, number]>(
+      `SELECT COUNT(*) as cnt
+       FROM edges
+       WHERE run_id=? AND (from_node_id=? OR to_node_id=?)`
+    ).get(this.runId, nodeId, nodeId)
+
+    return {
+      diagnosticCount: diagnosticRow?.cnt ?? 0,
+      edgeCount: edgeRow?.cnt ?? 0,
+    }
   }
 
   getGitContext(nodeId: number, limit = 3): EvidenceRow[] {
@@ -224,9 +246,9 @@ export class Navigator {
     ).all(this.runId, limit)
   }
 
-  getRunInfo(): { id: number; repo_commit: string | null; started_at: string } | null {
-    return this.db.query<{ id: number; repo_commit: string | null; started_at: string }, [number]>(
-      'SELECT id, repo_commit, started_at FROM runs WHERE id=?'
+  getRunInfo(): { id: number; repo_root: string; repo_commit: string | null; started_at: string } | null {
+    return this.db.query<{ id: number; repo_root: string; repo_commit: string | null; started_at: string }, [number]>(
+      'SELECT id, repo_root, repo_commit, started_at FROM runs WHERE id=?'
     ).get(this.runId) ?? null
   }
 }
