@@ -61,6 +61,8 @@ code-spider atoms --repo /path/to/repo --db /tmp/repo-code-spider.db unit:src/ma
 ```
 
 Use `doctor` to decide whether semantic results are trustworthy:
+- `Selected plugins` shows which built-in plugin path is active per detected language
+- `Selected analyzers` shows which concrete tools that plugin can use in the current environment
 - `symbolNavigation: true` means symbol extraction succeeded in the last run
 - `semanticRefs: true` means references are usable
 - `diagnostics: true` means analyzers produced diagnostic coverage
@@ -100,7 +102,7 @@ Use the output to explain:
 code-spider doctor --repo /path/to/repo --db /tmp/repo.db
 ```
 
-If analyzers are missing or last-run coverage is poor, stay in structural-plus-context mode and say so clearly.
+If the selected plugin path is unavailable, degraded, or last-run coverage is poor, stay in structural-plus-context mode and say so clearly.
 
 ## Ignore config
 

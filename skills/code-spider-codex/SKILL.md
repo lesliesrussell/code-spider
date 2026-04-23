@@ -39,8 +39,8 @@ code-spider doctor --repo /path/to/repo --db /tmp/repo-code-spider.db
 - `show`: details for one repo/zone/unit node, including git and markdown context when available
 - `children`: top files in a zone
 - `related`: nearby files based on symbols, flows, markdown, git co-change, and tracked work
-- `defs`, `refs`, `atoms`: semantic navigation when analyzers support it
-- `doctor`: which analyzers exist and what the last semantic run actually achieved
+- `defs`, `refs`, `atoms`: semantic navigation when the selected language plugin and its analyzers support it
+- `doctor`: which plugins and analyzers are active for the repo and what the last semantic run actually achieved
 
 ## High-signal workflows
 
@@ -81,7 +81,11 @@ code-spider refs --repo /path/to/repo --db /tmp/repo.db SymbolName
 code-spider atoms --repo /path/to/repo --db /tmp/repo.db unit:src/file.ts
 ```
 
-If `doctor` shows `symbolNavigation: false` or `semanticRefs: false`, explain that the current analyzer path is unavailable or returned no results.
+Read `doctor` as two layers:
+- `Selected plugins`: which built-in plugin path is active per detected language
+- `Selected analyzers`: which concrete tools that plugin can use in the current environment
+
+If `doctor` shows `symbolNavigation: false` or `semanticRefs: false`, explain that the selected plugin path is unavailable, degraded, or returned no results.
 
 ## Config and hygiene
 
