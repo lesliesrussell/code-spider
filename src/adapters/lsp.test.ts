@@ -19,7 +19,7 @@ function makeTempDir(name: string): string {
   return dir
 }
 
-function writeFakeServer(mode: 'symbols' | 'refs' | 'diagnostics' | 'workspace-refs', outputPath: string): string {
+function writeFakeServer(mode: 'symbols' | 'refs' | 'definitions' | 'diagnostics' | 'workspace-refs', outputPath: string): string {
   const scriptPath = join(makeTempDir(`code-spider-lsp-${mode}`), 'server.js')
   const script = `
 const fs = require('node:fs')
@@ -146,6 +146,22 @@ process.stdin.on('data', chunk => {
                 end: { line: 8, character: 21 },
               },
             }]) : [],
+      })
+      continue
+    }
+
+    if (msg.method === 'textDocument/definition') {
+      record({ requestReceived: 'definition' })
+      send({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: initialized && opened ? [{
+          uri: msg.params.textDocument.uri,
+          range: {
+            start: { line: 0, character: 13 },
+            end: { line: 0, character: 27 },
+          },
+        }] : [],
       })
       continue
     }
@@ -298,7 +314,33 @@ describe('LspAdapter', () => {
     })
   })
 
-  test('hydrates workspace files before references queries', async () => {
+  test('sends initialized before textDocument/definition', async () => {
+    const repoRoot = makeTempDir('code-spider-lsp-defs-repo')
+    const filePath = join(repoRoot, 'example.ts')
+    const statePath = join(repoRoot, 'defs-state.json')
+    writeFileSync(filePath, 'export class ExampleService {}\nnew ExampleService()\n')
+    const serverPath = writeFakeServer('definitions', statePath)
+
+    const result = await new LspAdapter().getDefinitions(
+      filePath,
+      'TypeScript',
+      { line: 1, character: 4 },
+      repoRoot,
+      [process.execPath, serverPath, statePath],
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.locations).toEqual([{
+      uri: `file://${filePath}`,
+      path: filePath,
+      range: {
+        start: { line: 0, character: 13 },
+        end: { line: 0, character: 27 },
+      },
+    }])
+  })
+
+  test('opens provided workspace files before references queries', async () => {
     const repoRoot = makeTempDir('code-spider-lsp-workspace-refs-repo')
     const filePath = join(repoRoot, 'service.ts')
     const otherPath = join(repoRoot, 'consumer.ts')
@@ -313,6 +355,7 @@ describe('LspAdapter', () => {
       { line: 0, character: 13 },
       repoRoot,
       [process.execPath, serverPath, statePath],
+      [filePath, otherPath],
     )
 
     expect(result.error).toBeUndefined()

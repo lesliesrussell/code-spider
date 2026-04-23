@@ -10,6 +10,7 @@ It indexes a repo into SQLite, then gives you a fast structural and semantic map
 - definitions and references
 - atom-level symbol listings inside a file
 - analyzer coverage reporting through `doctor`
+- plugin-backed language analysis for semantic capabilities
 - curated context from git, markdown, and beads
 
 ## Install
@@ -175,12 +176,14 @@ The current capabilities are:
 
 Coverage depends on:
 - the repo language
-- which analyzers are configured in the shipped YAML registry
+- which built-in language plugin is selected for that language
+- which analyzers are configured behind that plugin in the shipped YAML registry
 - which tools are actually installed on the machine
 - what succeeded in the latest semantic run
 
 Use `doctor` to see both:
-- selected analyzers from the registry
+- selected analyzers from the active plugin path
+- selected plugins per detected language
 - last-run analyzer coverage from `analyzer_runs`
 - context enricher availability and observed latest-run results for `git`, `markdown`, and `beads`
 
@@ -195,6 +198,7 @@ Important details:
 - `defs` uses indexed symbols from the latest run
 - `refs` uses analyzer-backed references when available and falls back to indexed symbol locations
 - `atoms` lists indexed symbols inside a unit
+- semantic execution now goes through built-in language plugins; the core records telemetry and stores normalized results
 - `doctor` separates sweep coverage from on-demand activity, so `refs` is reported as query activity rather than repo-wide coverage
 - `doctor` reports context enrichers with explicit `available` versus `observed` status
 
@@ -214,6 +218,31 @@ That context is surfaced selectively:
 - `related` uses shared docs, shared issues, co-change history, flows, and freshness-aware ranking, and shows typed signal labels in output
 - `investigate show` enriches attached nodes with linked docs, issues, and git rationale
 - `export report` folds the same curated context into node and investigation reports
+
+## Language Plugins
+
+Semantic analysis now runs through a typed built-in language-plugin layer.
+
+- `typescript` and `javascript` are handled by a shared built-in plugin
+- `zig` is handled by a dedicated built-in plugin
+- other configured languages currently fall back through a registry-backed built-in legacy plugin
+
+The plugin boundary now owns:
+
+- language detection used by `doctor`
+- analyzer selection metadata used for registration and health reporting
+- semantic execution for `symbols`, `defs`, `refs`, and `diagnostics`
+- workspace hydration policy for LSP-backed refs/defs
+- low-signal symbol tagging
+
+The core still owns:
+
+- run orchestration
+- analyzer run telemetry
+- SQLite persistence
+- command output and degradation reporting
+
+See [language-plugin-design.md](/Users/leslierussell/repo/code-spider/language-plugin-design.md) for the architecture note and current migration status.
 
 ## Current Limitations
 

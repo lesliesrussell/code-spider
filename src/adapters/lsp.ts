@@ -1,7 +1,5 @@
-import { execSync, spawn } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
-import type { RegistryAnalyzer, RegistryLanguage } from '../analyzer-registry'
+import { spawn } from 'node:child_process'
+import { readdirSync, readFileSync } from 'node:fs'
 
 export interface LspSymbol {
   name: string
@@ -30,18 +28,6 @@ export interface LspResult {
 export interface LspLocation {
   uri: string
   range: { start: { line: number; character: number }; end: { line: number; character: number } }
-}
-
-export interface DetectedLsp {
-  language: string
-  toolName: string
-  command: string[]
-  available: boolean
-}
-
-interface ResolvedLspCandidate {
-  language: RegistryLanguage
-  analyzer: RegistryAnalyzer
 }
 
 type LspRange = LspSymbol['range']
@@ -78,15 +64,6 @@ const LOW_SIGNAL_IDENTIFIER_NAMES = new Set([
 
 const LOW_SIGNAL_IDENTIFIER_KINDS = new Set(['Constant', 'Field', 'Property', 'Variable'])
 
-function isAvailable(bin: string): boolean {
-  try {
-    execSync(`which ${bin}`, { stdio: 'ignore', timeout: 2000 })
-    return true
-  } catch {
-    return false
-  }
-}
-
 function fileUri(filePath: string): string {
   return `file://${filePath}`
 }
@@ -95,7 +72,7 @@ function uriToPath(uri: string): string {
   return uri.startsWith('file://') ? uri.slice('file://'.length) : uri
 }
 
-function collectWorkspaceFiles(repoRoot: string, extensions: string[], ignoreDirs = new Set(['.git', '.code-spider', 'node_modules'])): string[] {
+export function collectWorkspaceFiles(repoRoot: string, extensions: string[], ignoreDirs = new Set(['.git', '.code-spider', 'node_modules'])): string[] {
   const results: string[] = []
 
   const visit = (dir: string): void => {
@@ -426,6 +403,114 @@ async function tryRealLspReferences(
   })
 }
 
+async function tryRealLspDefinitions(
+  filePath: string,
+  command: string[],
+  languageId: string,
+  position: { line: number; character: number },
+  repoRoot: string,
+  workspaceFiles: Array<{ path: string; text: string }>,
+): Promise<LspLocation[] | null> {
+  return new Promise((resolve) => {
+    const [bin, ...args] = command
+    if (bin === undefined) { resolve(null); return }
+
+    let proc: ReturnType<typeof spawn>
+    try {
+      proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+    } catch {
+      resolve(null)
+      return
+    }
+
+    const timer = setTimeout(() => {
+      try { proc.kill() } catch { /* ignore */ }
+      resolve(null)
+    }, 10000)
+
+    let buf = ''
+    let initialized = false
+    let definitionRequested = false
+
+    const send = (msg: object): void => {
+      const body = JSON.stringify(msg)
+      proc.stdin?.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
+    }
+
+    const uri = fileUri(filePath)
+
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      buf += chunk.toString()
+      while (true) {
+        const headerEnd = buf.indexOf('\r\n\r\n')
+        if (headerEnd === -1) break
+        const header = buf.slice(0, headerEnd)
+        const lenMatch = /Content-Length:\s*(\d+)/i.exec(header)
+        if (!lenMatch) { buf = buf.slice(headerEnd + 4); continue }
+        const len = parseInt(lenMatch[1]!, 10)
+        const bodyStart = headerEnd + 4
+        if (buf.length < bodyStart + len) break
+        const body = buf.slice(bodyStart, bodyStart + len)
+        buf = buf.slice(bodyStart + len)
+
+        let msg: { id?: number; result?: unknown }
+        try { msg = JSON.parse(body) } catch { continue }
+
+        if (!initialized && msg.id === 1 && msg.result !== undefined) {
+          initialized = true
+          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
+          for (const workspaceFile of workspaceFiles) {
+            send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
+              textDocument: {
+                uri: fileUri(workspaceFile.path),
+                languageId,
+                version: 1,
+                text: workspaceFile.text,
+              },
+            }})
+          }
+          definitionRequested = true
+          send({ jsonrpc: '2.0', id: 2, method: 'textDocument/definition', params: {
+            textDocument: { uri },
+            position,
+          }})
+        } else if (definitionRequested && msg.id === 2) {
+          const rawResult = Array.isArray(msg.result) ? msg.result : (msg.result ? [msg.result] : [])
+          const locations: LspLocation[] = rawResult.flatMap(item => {
+            const raw = item as Record<string, unknown>
+            const locationUri = typeof raw['uri'] === 'string'
+              ? raw['uri']
+              : (typeof raw['targetUri'] === 'string' ? raw['targetUri'] : undefined)
+            const range = isRange(raw['range'])
+              ? raw['range']
+              : (isRange(raw['targetSelectionRange']) ? raw['targetSelectionRange'] : undefined)
+            if (!locationUri || !range) return []
+            return [{ uri: locationUri, range }]
+          })
+          send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
+          send({ jsonrpc: '2.0', method: 'exit', params: null })
+          clearTimeout(timer)
+          try { proc.kill() } catch { /* ignore */ }
+          resolve(locations)
+        }
+      }
+    })
+
+    proc.on('error', () => { clearTimeout(timer); resolve(null) })
+    proc.on('close', () => { clearTimeout(timer); resolve(null) })
+
+    send({
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: {
+        processId: process.pid,
+        rootUri: fileUri(repoRoot),
+        capabilities: { textDocument: { definition: { dynamicRegistration: false } } },
+        initializationOptions: {},
+      },
+    })
+  })
+}
+
 async function tryRealLspDiagnostics(
   filePath: string,
   command: string[],
@@ -546,68 +631,6 @@ async function tryRealLspDiagnostics(
 }
 
 export class LspAdapter {
-  private readonly registry = loadDefaultAnalyzerRegistry()
-
-  private findLanguageDefinition(language: string): RegistryLanguage | undefined {
-    const normalized = language.toLowerCase()
-    return this.registry.languages.find(entry =>
-      entry.id === normalized ||
-      entry.display_name.toLowerCase() === normalized ||
-      (entry.aliases ?? []).some(alias => alias.toLowerCase() === normalized)
-    )
-  }
-
-  private isAnalyzerEligible(analyzer: RegistryAnalyzer, repoRoot: string): boolean {
-    if ((analyzer.required_files ?? []).length === 0) return true
-    return analyzer.required_files?.every(file => existsSync(`${repoRoot}/${file}`)) ?? true
-  }
-
-  private getLspCandidates(repoRoot: string, language?: string): ResolvedLspCandidate[] {
-    const languageEntry = language ? this.findLanguageDefinition(language) : undefined
-    const languages = languageEntry ? [languageEntry] : language ? [] : this.registry.languages
-
-    const candidates: ResolvedLspCandidate[] = []
-    for (const entry of languages) {
-      for (const analyzer of entry.analyzers) {
-        if (analyzer.kind !== 'lsp') continue
-        if (!this.isAnalyzerEligible(analyzer, repoRoot)) continue
-        candidates.push({ language: entry, analyzer })
-      }
-    }
-
-    return candidates.sort((a, b) => b.analyzer.priority - a.analyzer.priority)
-  }
-
-  getSupportedLanguages(): string[] {
-    return this.registry.languages.flatMap(entry => [
-      entry.id,
-      entry.display_name,
-      ...(entry.aliases ?? []),
-    ])
-  }
-
-  async detectAvailable(repoRoot: string): Promise<DetectedLsp[]> {
-    const seen = new Set<string>()
-    const results: DetectedLsp[] = []
-
-    for (const candidate of this.getLspCandidates(repoRoot)) {
-      const bin = candidate.analyzer.command[0]
-      if (bin === undefined) continue
-      const key = `${candidate.language.id}:${candidate.analyzer.tool}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      const available = isAvailable(bin)
-      results.push({
-        language: candidate.language.id,
-        toolName: candidate.analyzer.tool,
-        command: candidate.analyzer.command,
-        available,
-      })
-    }
-
-    return results
-  }
-
   async getSymbols(
     filePath: string,
     language: string,
@@ -615,13 +638,8 @@ export class LspAdapter {
     commandOverride?: string[],
     allowHeuristicFallback = false,
   ): Promise<LspResult> {
-    const languageDef = this.findLanguageDefinition(language)
-    const langLower = languageDef?.id ?? language.toLowerCase()
-
-    // Find a matching available LSP server
-    const selectedCommand = commandOverride ?? this.getLspCandidates(repoRoot, langLower).find(
-      candidate => isAvailable(candidate.analyzer.command[0] ?? '')
-    )?.analyzer.command
+    const langLower = language.toLowerCase()
+    const selectedCommand = commandOverride
 
     if (selectedCommand !== undefined) {
       try {
@@ -647,22 +665,17 @@ export class LspAdapter {
     position: { line: number; character: number },
     repoRoot = process.cwd(),
     commandOverride?: string[],
+    workspaceFilePaths?: string[],
   ): Promise<{ locations: Array<LspLocation & { path: string }>; error?: string }> {
-    const languageDef = this.findLanguageDefinition(language)
-    const langLower = languageDef?.id ?? language.toLowerCase()
-    const selectedCommand = commandOverride ?? this.getLspCandidates(repoRoot, langLower).find(
-      candidate => isAvailable(candidate.analyzer.command[0] ?? '')
-    )?.analyzer.command
+    const langLower = language.toLowerCase()
+    const selectedCommand = commandOverride
 
     if (selectedCommand === undefined) {
       return { locations: [], error: 'no-references-provider' }
     }
 
     try {
-      const extensions = languageDef?.detect.extensions ?? []
-      const workspacePaths = extensions.length > 0
-        ? collectWorkspaceFiles(repoRoot, extensions)
-        : [filePath]
+      const workspacePaths = workspaceFilePaths ?? [filePath]
       const workspaceFiles = workspacePaths.flatMap(path => {
         try {
           return [{ path, text: readFileSync(path, 'utf8') }]
@@ -697,17 +710,64 @@ export class LspAdapter {
     return { locations: [], error: 'no-references' }
   }
 
+  async getDefinitions(
+    filePath: string,
+    language: string,
+    position: { line: number; character: number },
+    repoRoot = process.cwd(),
+    commandOverride?: string[],
+    workspaceFilePaths?: string[],
+  ): Promise<{ locations: Array<LspLocation & { path: string }>; error?: string }> {
+    const langLower = language.toLowerCase()
+    const selectedCommand = commandOverride
+
+    if (selectedCommand === undefined) {
+      return { locations: [], error: 'no-definitions-provider' }
+    }
+
+    try {
+      const workspacePaths = workspaceFilePaths ?? [filePath]
+      const workspaceFiles = workspacePaths.flatMap(path => {
+        try {
+          return [{ path, text: readFileSync(path, 'utf8') }]
+        } catch {
+          return []
+        }
+      })
+      const ensuredTarget = workspaceFiles.some(file => file.path === filePath)
+        ? workspaceFiles
+        : [{ path: filePath, text: readFileSync(filePath, 'utf8') }, ...workspaceFiles]
+      const locations = await tryRealLspDefinitions(
+        filePath,
+        selectedCommand,
+        langLower,
+        position,
+        repoRoot,
+        ensuredTarget,
+      )
+      if (locations !== null) {
+        return {
+          locations: locations.map(location => ({
+            ...location,
+            path: uriToPath(location.uri),
+          })),
+        }
+      }
+    } catch {
+      // fall through
+    }
+
+    return { locations: [], error: 'no-definitions' }
+  }
+
   async getDiagnostics(
     filePath: string,
     language: string,
     repoRoot = process.cwd(),
     commandOverride?: string[],
   ): Promise<{ diagnostics: LspDiagnostic[]; error?: string }> {
-    const languageDef = this.findLanguageDefinition(language)
-    const langLower = languageDef?.id ?? language.toLowerCase()
-    const selectedCommand = commandOverride ?? this.getLspCandidates(repoRoot, langLower).find(
-      candidate => isAvailable(candidate.analyzer.command[0] ?? '')
-    )?.analyzer.command
+    const langLower = language.toLowerCase()
+    const selectedCommand = commandOverride
 
     if (selectedCommand === undefined) {
       return { diagnostics: [], error: 'no-diagnostics-provider' }

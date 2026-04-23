@@ -1,3 +1,5 @@
+import type { AnalyzerCapability, AnalyzerKind } from './analyzer-registry'
+
 export const LANGUAGE_PLUGIN_CAPABILITIES = [
   'symbols',
   'definitions',
@@ -74,6 +76,7 @@ export interface PluginCapabilityStatus {
 export interface PluginDetectionResult {
   supported: boolean
   confidence: number
+  languageId?: string
   reason?: string
 }
 
@@ -85,6 +88,7 @@ export interface PluginContext {
 
 export interface DefinitionsQuery extends PluginContext {
   symbol: string
+  position?: PluginPosition
 }
 
 export interface ReferencesQuery extends PluginContext {
@@ -110,6 +114,17 @@ export interface PluginExecutionAttempt {
   metadata?: Record<string, unknown>
 }
 
+export interface PluginAnalyzerDescriptor {
+  analyzerId: string
+  kind: AnalyzerKind
+  tool: string
+  command: string[]
+  capabilities: AnalyzerCapability[]
+  priority: number
+  available: boolean
+  notes?: string
+}
+
 export interface LanguagePlugin {
   id: string
   displayName: string
@@ -119,6 +134,7 @@ export interface LanguagePlugin {
   detect(repoRoot: string, filePath: string): PluginDetectionResult
   health(repoRoot: string): PluginHealth
   capabilityStatus(repoRoot: string): Record<LanguagePluginCapability, PluginCapabilityStatus>
+  describeAnalyzers(repoRoot: string, languageId: string): PluginAnalyzerDescriptor[]
 
   getSymbols(ctx: PluginContext): Promise<PluginResult<PluginSymbol>>
   getDefinitions(query: DefinitionsQuery): Promise<PluginResult<PluginDefinition>>

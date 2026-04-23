@@ -26,6 +26,15 @@ describe('doctor command', () => {
       lastRunId: 1,
       detectedLanguages: ['typescript'],
       selectedAnalyzers: [],
+      selectedPlugins: [
+        {
+          language: 'typescript',
+          pluginId: 'builtin.typescript-javascript',
+          available: true,
+          capabilities: ['symbols', 'definitions', 'references', 'diagnostics', 'health'],
+          details: 'typescript-language-server',
+        },
+      ],
       lastRunCoverage: [
         {
           capability: 'symbols',
@@ -80,6 +89,8 @@ describe('doctor command', () => {
     expect(lines).toContain('  ✓ symbols  10/12 successful  [success:10, no_result:2]')
     expect(lines).toContain('Last run on-demand activity')
     expect(lines).toContain('  ✓ refs  3 queries run  [success:3]')
+    expect(lines).toContain('Selected plugins')
+    expect(lines).toContain('  typescript:builtin.typescript-javascript  [available]  symbols, definitions, references, diagnostics, health  typescript-language-server')
     expect(lines).toContain('Context enrichers')
     expect(lines).toContain('  git         [available, observed]  evidence:3, cochange:2')
     expect(lines).toContain('  markdown    [available, not observed]  docs:0, sections:0, mentions:0')

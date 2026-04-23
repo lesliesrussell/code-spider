@@ -189,6 +189,7 @@ describe('AnalyzerRunner', () => {
         getSymbols: async () => ({ filePath: '', symbols: [], diagnostics: [] }),
         getDiagnostics: async () => ({ diagnostics: [] }),
         getReferences: async () => ({ locations: [] }),
+        getDefinitions: async () => ({ locations: [] }),
       },
     })
 
@@ -210,5 +211,200 @@ describe('AnalyzerRunner', () => {
     ).get(runId)
 
     expect(analyzerRun).toEqual({ capability: 'diagnostics', status: 'success' })
+  })
+
+  test('routes Zig references through the built-in plugin path and records coverage', async () => {
+    const repoRoot = makeTempDir('code-spider-runner-zig-refs')
+    writeFileSync(join(repoRoot, 'main.zig'), 'const Example = struct {};\n')
+
+    const dbPath = makeTempDbPath('code-spider-runner-zig-refs-db')
+    const { db, runId, nodeId } = seedRunAndNode(dbPath, repoRoot, 'main.zig', 'Zig')
+
+    const registry: AnalyzerRegistryDocument = {
+      version: 1,
+      capabilities: ['symbols', 'defs', 'refs', 'diagnostics'],
+      languages: [{
+        id: 'zig',
+        display_name: 'Zig',
+        aliases: [],
+        detect: { extensions: ['.zig'] },
+        analyzers: [{
+          id: 'zls',
+          kind: 'lsp',
+          tool: 'zls',
+          command: ['zls'],
+          capabilities: ['refs'],
+          priority: 100,
+        }],
+      }],
+    }
+
+    const runner = new AnalyzerRunner({
+      registry,
+      commandExists: () => true,
+      lspAdapter: {
+        getSymbols: async () => ({ filePath: '', symbols: [], diagnostics: [] }),
+        getDiagnostics: async () => ({ diagnostics: [] }),
+        getReferences: async () => ({
+          locations: [{
+            uri: `file://${join(repoRoot, 'main.zig')}`,
+            path: join(repoRoot, 'main.zig'),
+            range: {
+              start: { line: 0, character: 6 },
+              end: { line: 0, character: 13 },
+            },
+          }],
+        }),
+        getDefinitions: async () => ({ locations: [] }),
+      },
+    })
+
+    runner.registerAnalyzers(db, runId, repoRoot, ['Zig'])
+    const result = await runner.executeReferences({
+      db,
+      runId,
+      nodeId,
+      filePath: join(repoRoot, 'main.zig'),
+      repoRoot,
+      language: 'Zig',
+      target: 'main.zig',
+      position: { line: 0, character: 6 },
+    })
+
+    expect(result.locations).toHaveLength(1)
+    expect(result.locations[0]?.path).toBe(join(repoRoot, 'main.zig'))
+
+    const analyzerRun = db.query<{ capability: string; status: string }, [number]>(
+      'SELECT capability, status FROM analyzer_runs WHERE run_id=? LIMIT 1'
+    ).get(runId)
+
+    expect(analyzerRun).toEqual({ capability: 'refs', status: 'success' })
+  })
+
+  test('routes unmigrated languages through the fallback registry plugin', async () => {
+    const repoRoot = makeTempDir('code-spider-runner-python-diags')
+    writeFileSync(join(repoRoot, 'main.py'), 'answer = 42\n')
+
+    const dbPath = makeTempDbPath('code-spider-runner-python-diags-db')
+    const { db, runId, nodeId } = seedRunAndNode(dbPath, repoRoot, 'main.py', 'Python')
+
+    const registry: AnalyzerRegistryDocument = {
+      version: 1,
+      capabilities: ['symbols', 'defs', 'refs', 'diagnostics'],
+      languages: [{
+        id: 'python',
+        display_name: 'Python',
+        aliases: ['py'],
+        detect: { extensions: ['.py'] },
+        analyzers: [{
+          id: 'pyright-lsp',
+          kind: 'lsp',
+          tool: 'pyright-langserver',
+          command: ['pyright-langserver', '--stdio'],
+          capabilities: ['diagnostics'],
+          priority: 100,
+        }],
+      }],
+    }
+
+    const runner = new AnalyzerRunner({
+      registry,
+      commandExists: () => true,
+      lspAdapter: {
+        getSymbols: async () => ({ filePath: '', symbols: [], diagnostics: [] }),
+        getDiagnostics: async () => ({ diagnostics: [] }),
+        getReferences: async () => ({ locations: [] }),
+        getDefinitions: async () => ({ locations: [] }),
+      },
+    })
+
+    runner.registerAnalyzers(db, runId, repoRoot, ['Python'])
+    const result = await runner.executeDiagnostics({
+      db,
+      runId,
+      nodeId,
+      filePath: join(repoRoot, 'main.py'),
+      repoRoot,
+      language: 'Python',
+      target: 'main.py',
+    })
+
+    expect(result.diagnostics).toEqual([])
+
+    const analyzerRun = db.query<{ capability: string; status: string }, [number]>(
+      'SELECT capability, status FROM analyzer_runs WHERE run_id=? LIMIT 1'
+    ).get(runId)
+
+    expect(analyzerRun).toEqual({ capability: 'diagnostics', status: 'success' })
+  })
+
+  test('routes definitions through the plugin path and records coverage', async () => {
+    const repoRoot = makeTempDir('code-spider-runner-defs')
+    mkdirSync(join(repoRoot, 'src'), { recursive: true })
+    writeFileSync(join(repoRoot, 'src', 'index.ts'), 'export class ExampleService {}\nnew ExampleService()\n')
+
+    const dbPath = makeTempDbPath('code-spider-runner-defs-db')
+    const { db, runId, nodeId } = seedRunAndNode(dbPath, repoRoot, 'src/index.ts', 'TypeScript')
+
+    const registry: AnalyzerRegistryDocument = {
+      version: 1,
+      capabilities: ['symbols', 'defs', 'refs', 'diagnostics'],
+      languages: [{
+        id: 'typescript',
+        display_name: 'TypeScript',
+        aliases: ['ts'],
+        detect: { extensions: ['.ts'] },
+        analyzers: [{
+          id: 'tsserver-lsp',
+          kind: 'lsp',
+          tool: 'typescript-language-server',
+          command: ['typescript-language-server', '--stdio'],
+          capabilities: ['defs'],
+          priority: 100,
+        }],
+      }],
+    }
+
+    const runner = new AnalyzerRunner({
+      registry,
+      commandExists: () => true,
+      lspAdapter: {
+        getSymbols: async () => ({ filePath: '', symbols: [], diagnostics: [] }),
+        getDiagnostics: async () => ({ diagnostics: [] }),
+        getReferences: async () => ({ locations: [] }),
+        getDefinitions: async () => ({
+          locations: [{
+            uri: `file://${join(repoRoot, 'src', 'index.ts')}`,
+            path: join(repoRoot, 'src', 'index.ts'),
+            range: {
+              start: { line: 0, character: 13 },
+              end: { line: 0, character: 27 },
+            },
+          }],
+        }),
+      },
+    })
+
+    runner.registerAnalyzers(db, runId, repoRoot, ['TypeScript'])
+    const result = await runner.executeDefinitions({
+      db,
+      runId,
+      nodeId,
+      filePath: join(repoRoot, 'src', 'index.ts'),
+      repoRoot,
+      language: 'TypeScript',
+      target: 'src/index.ts',
+      symbol: 'ExampleService',
+      position: { line: 1, character: 4 },
+    })
+
+    expect(result.locations).toHaveLength(1)
+    expect(result.locations[0]?.path).toBe(join(repoRoot, 'src', 'index.ts'))
+
+    const analyzerRun = db.query<{ capability: string; status: string }, [number]>(
+      'SELECT capability, status FROM analyzer_runs WHERE run_id=? LIMIT 1'
+    ).get(runId)
+
+    expect(analyzerRun).toEqual({ capability: 'defs', status: 'success' })
   })
 })

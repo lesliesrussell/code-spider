@@ -20,8 +20,8 @@ function makeTempRepo(name: string): string {
   return dir
 }
 
-describe('DoctorService registry reporting', () => {
-  test('reports detected languages and selected analyzers from the registry', async () => {
+describe('DoctorService plugin reporting', () => {
+  test('reports detected languages and selected analyzers from the active plugin path', async () => {
     const repoRoot = makeTempRepo('code-spider-doctor')
     mkdirSync(join(repoRoot, 'src'), { recursive: true })
     writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture' }, null, 2))
@@ -34,7 +34,7 @@ describe('DoctorService registry reporting', () => {
     )
 
     expect(report.detectedLanguages).toContain('typescript')
-    expect(report.detectedLanguages).toContain('javascript')
+    expect(report.detectedLanguages).not.toContain('javascript')
     expect(
       report.selectedAnalyzers.some(analyzer =>
         analyzer.language === 'typescript' &&
@@ -42,6 +42,14 @@ describe('DoctorService registry reporting', () => {
         analyzer.capabilities.includes('refs')
       )
     ).toBe(true)
+    expect(report.selectedPlugins).toEqual([
+      {
+        language: 'typescript',
+        pluginId: 'builtin.typescript-javascript',
+        available: true,
+        capabilities: ['symbols', 'definitions', 'references', 'diagnostics', 'health'],
+      },
+    ])
     expect(report.lastRunCoverage).toEqual([])
     expect(report.fidelity.symbolNavigation).toBe(true)
     expect(report.fidelity.semanticRefs).toBe(true)
@@ -79,6 +87,7 @@ describe('DoctorService registry reporting', () => {
 
     expect(report.detectedLanguages).toEqual([])
     expect(report.selectedAnalyzers).toEqual([])
+    expect(report.selectedPlugins).toEqual([])
     expect(report.lastRunCoverage).toEqual([])
     expect(report.fidelity.symbolNavigation).toBe(false)
     expect(report.fidelity.semanticRefs).toBe(false)
@@ -118,6 +127,14 @@ describe('DoctorService registry reporting', () => {
 
     const report = await new DoctorService().run(repoRoot, dbPath)
 
+    expect(report.selectedPlugins).toEqual([
+      {
+        language: 'typescript',
+        pluginId: 'builtin.typescript-javascript',
+        available: true,
+        capabilities: ['symbols', 'definitions', 'references', 'diagnostics', 'health'],
+      },
+    ])
     expect(report.lastRunCoverage).toEqual([
       {
         capability: 'diagnostics',
@@ -201,6 +218,14 @@ describe('DoctorService registry reporting', () => {
 
     const report = await new DoctorService().run(repoRoot, dbPath)
 
+    expect(report.selectedPlugins).toEqual([
+      {
+        language: 'typescript',
+        pluginId: 'builtin.typescript-javascript',
+        available: true,
+        capabilities: ['symbols', 'definitions', 'references', 'diagnostics', 'health'],
+      },
+    ])
     expect(report.lastRunCoverage).toEqual([
       {
         capability: 'diagnostics',
@@ -256,6 +281,14 @@ describe('DoctorService registry reporting', () => {
 
     const report = await new DoctorService().run(repoRoot, dbPath)
 
+    expect(report.selectedPlugins).toEqual([
+      {
+        language: 'typescript',
+        pluginId: 'builtin.typescript-javascript',
+        available: true,
+        capabilities: ['symbols', 'definitions', 'references', 'diagnostics', 'health'],
+      },
+    ])
     expect(report.contextEnrichers).toEqual([
       {
         name: 'git',

@@ -3,7 +3,8 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
-import type { AnalyzerCapability, RegistryAnalyzer, RegistryLanguage } from '../analyzer-registry'
+import type { AnalyzerCapability, AnalyzerRegistryDocument, RegistryLanguage } from '../analyzer-registry'
+import { BuiltinLanguagePluginRegistry } from '../language-plugin-registry'
 import { openDb } from '../db/init'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
@@ -35,6 +36,13 @@ export interface DoctorReport {
     tool: string
     available: boolean
     capabilities: AnalyzerCapability[]
+  }>
+  selectedPlugins: Array<{
+    language: string
+    pluginId: string
+    available: boolean
+    capabilities: string[]
+    details?: string
   }>
   lastRunCoverage: Array<{
     capability: AnalyzerCapability
@@ -143,17 +151,16 @@ function walkRepoFiles(root: string, maxEntries = 2000): string[] {
   return results
 }
 
-function detectLanguages(repoRoot: string): RegistryLanguage[] {
-  const registry = loadDefaultAnalyzerRegistry()
+function detectLanguages(
+  repoRoot: string,
+  registry: AnalyzerRegistryDocument,
+  plugins: BuiltinLanguagePluginRegistry,
+): RegistryLanguage[] {
   const files = walkRepoFiles(repoRoot)
-  const fileSet = new Set(files)
-
-  return registry.languages.filter(language => {
-    const extensions = language.detect.extensions ?? []
-    const manifests = language.detect.manifests ?? []
-    const hasExtension = extensions.some(ext => files.some(file => file.endsWith(ext)))
-    const hasManifest = manifests.some(file => fileSet.has(file))
-    return hasExtension || hasManifest
+  const detected = plugins.detectLanguages(repoRoot, files)
+  return detected.flatMap(entry => {
+    const language = registry.languages.find(candidate => candidate.id === entry.languageId)
+    return language === undefined ? [] : [language]
   })
 }
 
@@ -161,16 +168,15 @@ function hasMarkdownFiles(repoRoot: string): boolean {
   return walkRepoFiles(repoRoot).some(file => file.endsWith('.md') || file.endsWith('.mdx'))
 }
 
-function isAnalyzerEligible(repoRoot: string, analyzer: RegistryAnalyzer): boolean {
-  const requiredFiles = analyzer.required_files ?? []
-  return requiredFiles.every(file => existsSync(join(repoRoot, file)))
-}
-
 function toolCheckName(language: string, analyzerId: string): string {
   return `${language}:${analyzerId}`
 }
 
-function checkRegistryAnalyzers(repoRoot: string, languages: RegistryLanguage[]): {
+function checkSelectedAnalyzers(
+  repoRoot: string,
+  languages: RegistryLanguage[],
+  plugins: BuiltinLanguagePluginRegistry,
+): {
   checks: Check[]
   selectedAnalyzers: DoctorReport['selectedAnalyzers']
   capabilities: Set<AnalyzerCapability>
@@ -180,9 +186,8 @@ function checkRegistryAnalyzers(repoRoot: string, languages: RegistryLanguage[])
   const capabilities = new Set<AnalyzerCapability>()
 
   for (const language of languages) {
-    const analyzers = language.analyzers
-      .filter(analyzer => isAnalyzerEligible(repoRoot, analyzer))
-      .sort((a, b) => b.priority - a.priority)
+    const plugin = plugins.getByLanguage(language.id)
+    const analyzers = plugin?.describeAnalyzers(repoRoot, language.id) ?? []
 
     if (analyzers.length === 0) {
       checks.push({
@@ -194,37 +199,53 @@ function checkRegistryAnalyzers(repoRoot: string, languages: RegistryLanguage[])
     }
 
     for (const analyzer of analyzers) {
-      const bin = analyzer.command[0] ?? analyzer.tool
-      const available = tryExec(`which ${bin}`) !== null
       checks.push({
-        name: toolCheckName(language.id, analyzer.id),
-        status: available ? 'pass' : 'warn',
-        message: `${language.display_name}: ${analyzer.tool}${available ? ' available' : ' not found'}`,
+        name: toolCheckName(language.id, analyzer.analyzerId),
+        status: analyzer.available ? 'pass' : 'warn',
+        message: `${language.display_name}: ${analyzer.tool}${analyzer.available ? ' available' : ' not found'}`,
       })
 
       selectedAnalyzers.push({
         language: language.id,
-        analyzerId: analyzer.id,
+        analyzerId: analyzer.analyzerId,
         tool: analyzer.tool,
-        available,
+        available: analyzer.available,
         capabilities: analyzer.capabilities,
       })
     }
 
-    const bestAvailableByCapability = new Map<AnalyzerCapability, RegistryAnalyzer>()
     for (const analyzer of analyzers) {
-      const available = tryExec(`which ${analyzer.command[0] ?? analyzer.tool}`) !== null
-      if (!available) continue
+      if (!analyzer.available) continue
       for (const capability of analyzer.capabilities) {
-        if (!bestAvailableByCapability.has(capability)) {
-          bestAvailableByCapability.set(capability, analyzer)
-          capabilities.add(capability)
-        }
+        capabilities.add(capability)
       }
     }
   }
 
   return { checks, selectedAnalyzers, capabilities }
+}
+
+function checkPlugins(
+  repoRoot: string,
+  languages: RegistryLanguage[],
+  plugins: BuiltinLanguagePluginRegistry,
+): DoctorReport['selectedPlugins'] {
+  return languages.flatMap(language => {
+    const plugin = plugins.getByLanguage(language.id)
+    if (plugin === undefined) return []
+    const health = plugin.health(repoRoot)
+    const capabilityStatus = plugin.capabilityStatus(repoRoot)
+    const capabilities = Object.entries(capabilityStatus)
+      .filter(([, status]) => status.supported)
+      .map(([capability]) => capability)
+    return [{
+      language: language.id,
+      pluginId: plugin.id,
+      available: health.available,
+      capabilities,
+      details: health.details,
+    }]
+  })
 }
 
 function checkDatabase(dbPath: string): { check: Check; db: Database | null; lastRunId: number | null; lastRunDate: string | null; fileCount: number | null } {
@@ -451,11 +472,17 @@ function summarizeContextEnrichers(
 
 export class DoctorService {
   async run(repoRoot: string, dbPath: string, _scope?: string): Promise<DoctorReport> {
+  const registry = loadDefaultAnalyzerRegistry()
+  const plugins = new BuiltinLanguagePluginRegistry(
+    registry,
+    (bin: string) => tryExec(`which ${bin}`) !== null,
+  )
     const gitCheck = checkGit(repoRoot)
     const rgCheck = checkRg()
     const { check: dbCheck, db, lastRunId, fileCount: _fileCount } = checkDatabase(dbPath)
-    const detectedLanguages = detectLanguages(repoRoot)
-    const registryChecks = checkRegistryAnalyzers(repoRoot, detectedLanguages)
+    const detectedLanguages = detectLanguages(repoRoot, registry, plugins)
+    const registryChecks = checkSelectedAnalyzers(repoRoot, detectedLanguages, plugins)
+    const selectedPlugins = checkPlugins(repoRoot, detectedLanguages, plugins)
     const repoSizeCheck = checkRepoSize(repoRoot, db, lastRunId)
     const lastRunCoverage = summarizeLastRunCoverage(db, lastRunId)
     const contextEnrichers = summarizeContextEnrichers(
@@ -496,6 +523,7 @@ export class DoctorService {
       lastRunId,
       detectedLanguages: detectedLanguages.map(language => language.id),
       selectedAnalyzers: registryChecks.selectedAnalyzers,
+      selectedPlugins,
       lastRunCoverage,
       checks,
       fidelity,

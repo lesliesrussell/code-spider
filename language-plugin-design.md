@@ -20,6 +20,20 @@ The core should not know:
 - tool-specific fallback behavior
 - language-specific noise filtering heuristics
 
+## Status
+
+This design is now largely implemented for the built-in semantic path.
+
+Current state:
+
+- `AnalyzerRunner` resolves plugins for execution and records telemetry from plugin attempts
+- `doctor` uses plugin-backed language detection, analyzer selection, and plugin health reporting
+- TypeScript/JavaScript and Zig run through dedicated built-in plugins
+- a registry-backed built-in legacy plugin covers the remaining configured languages
+- `LspAdapter` has been narrowed toward transport: plugins now choose commands and workspace hydration policy
+
+Remaining work is incremental cleanup, not architectural proof-of-concept.
+
 ## Problem With The Current Design
 
 Today the analyzer registry describes language metadata, but execution behavior still lives in shared core code.
@@ -112,17 +126,23 @@ Do this incrementally.
 
 ### Phase 1: Introduce The Contract
 
+Status: complete
+
 - add the shared plugin types
 - write the migration design down
 - do not change user-facing behavior yet
 
 ### Phase 2: Add A Built-In Plugin Registry
 
+Status: complete
+
 - introduce a core `LanguagePluginRegistry`
 - register built-in plugins in code
 - let the core resolve `languageId -> plugin`
 
 ### Phase 3: Wrap Current TypeScript/JavaScript Support
+
+Status: complete
 
 - create a built-in plugin for the current TypeScript/JavaScript path
 - move LSP lifecycle and workspace hydration policy behind that plugin
@@ -131,10 +151,14 @@ Do this incrementally.
 
 ### Phase 4: Wrap Zig Support
 
+Status: complete
+
 - move `zls` lifecycle rules and Zig-specific diagnostics behavior into a Zig plugin
 - keep Zig-specific protocol handling out of shared LSP orchestration
 
 ### Phase 5: Narrow AnalyzerRunner
+
+Status: mostly complete
 
 `AnalyzerRunner` should shrink into a generic plugin orchestrator:
 
@@ -143,16 +167,18 @@ Do this incrementally.
 - record telemetry
 - return normalized results
 
-It should no longer branch on analyzer kind or know about LSP-specific flow.
+It no longer branches on analyzer kind for capability execution. Remaining cleanup is mostly around narrowing leftover metadata concerns rather than execution flow.
 
 ### Phase 6: Revisit The Registry
+
+Status: partially complete
 
 Once built-in plugins are stable:
 
 - either keep the YAML registry as plugin metadata input
 - or replace it with a code-first built-in plugin list
 
-That decision can wait until the execution boundary is real.
+The execution boundary is now real. The remaining open choice is whether the YAML registry should stay as static built-in metadata or eventually collapse into a code-first list.
 
 ## Contract Boundaries That Matter
 
@@ -224,11 +250,10 @@ That gets the architectural separation without adding packaging complexity.
 
 ## Success Criteria
 
-We will know the design is real when:
+We know the design is real when:
 
 - `AnalyzerRunner` no longer switches on analyzer kind for capability execution
-- `LspAdapter` is no longer the shared language abstraction
+- `LspAdapter` no longer chooses commands or workspace hydration policy from the registry
 - TypeScript/Zig quirks live in their own built-in plugins
 - `doctor`, `refs`, and `atoms` still behave the same from the user’s perspective
-- the core only consumes normalized plugin results and capability status
-
+- the core consumes normalized plugin results, plugin descriptors, and capability status

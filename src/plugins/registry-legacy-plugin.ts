@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import type { AnalyzerRegistryDocument, RegistryAnalyzer, RegistryLanguage } from '../analyzer-registry'
 import type {
   DefinitionsQuery,
@@ -19,7 +20,6 @@ import type {
 import { collectWorkspaceFiles, LspAdapter } from '../adapters/lsp'
 import { heuristicSymbols } from './shared/heuristic-symbols'
 
-type SupportedLanguageId = 'typescript' | 'javascript'
 type Capability = 'symbols' | 'diagnostics' | 'references' | 'definitions'
 
 interface ResolvedAnalyzer {
@@ -27,43 +27,54 @@ interface ResolvedAnalyzer {
   analyzer: RegistryAnalyzer
 }
 
-export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
-  readonly id = 'builtin.typescript-javascript'
-  readonly displayName = 'Built-in TypeScript/JavaScript Plugin'
-  readonly languageIds = ['typescript', 'javascript']
+export class RegistryLegacyPlugin implements LanguagePlugin {
+  readonly id = 'builtin.registry-legacy'
+  readonly displayName = 'Built-in Registry Legacy Plugin'
+  readonly languageIds: string[] = []
   readonly capabilities = ['symbols', 'diagnostics', 'references', 'health'] as const
 
   constructor(
     private readonly registry: AnalyzerRegistryDocument,
     private readonly commandExists: (bin: string) => boolean,
     private readonly lsp: Pick<LspAdapter, 'getSymbols' | 'getDiagnostics' | 'getReferences' | 'getDefinitions'> = new LspAdapter(),
+    private readonly excludedLanguageIds = new Set<string>(),
   ) {}
 
   detect(repoRoot: string, filePath: string): PluginDetectionResult {
     const language = this.findLanguageFromPath(filePath)
     if (language === undefined) return { supported: false, confidence: 0 }
-    const candidates = this.getCandidates(repoRoot, language.id, 'symbols')
+    const candidates = ['symbols', 'diagnostics', 'references'].flatMap(capability =>
+      this.getCandidates(repoRoot, language.id, capability as Capability),
+    )
     return {
       supported: true,
-      confidence: candidates.length > 0 ? 0.9 : 0.6,
+      confidence: candidates.length > 0 ? 0.8 : 0.5,
       languageId: language.id,
       reason: candidates.length > 0 ? undefined : 'no configured analyzers matched',
     }
   }
 
   health(repoRoot: string): PluginHealth {
-    const candidates = this.languageIds.flatMap(languageId => this.getCandidates(repoRoot, languageId, 'symbols'))
-    const available = candidates.some(candidate => this.commandExists(candidate.analyzer.command[0] ?? ''))
+    const candidates = this.registry.languages
+      .filter(language => !this.excludedLanguageIds.has(language.id))
+      .flatMap(language => ['symbols', 'diagnostics', 'references'].flatMap(capability =>
+        this.getCandidates(repoRoot, language.id, capability as Capability),
+      ))
+    const available = candidates.some(candidate =>
+      candidate.analyzer.kind === 'heuristic' || this.commandExists(candidate.analyzer.command[0] ?? ''),
+    )
     return {
       available,
-      toolName: 'typescript-language-server',
-      details: available ? undefined : 'No TypeScript/JavaScript semantic provider available',
+      toolName: 'registry-defined analyzers',
+      details: available ? undefined : 'No registry-based semantic providers available',
     }
   }
 
   capabilityStatus(repoRoot: string): Record<'symbols' | 'definitions' | 'references' | 'diagnostics' | 'health', PluginCapabilityStatus> {
     const supports = (capability: Capability): PluginCapabilityStatus => {
-      const candidates = this.languageIds.flatMap(languageId => this.getCandidates(repoRoot, languageId, capability))
+      const candidates = this.registry.languages
+        .filter(language => !this.excludedLanguageIds.has(language.id))
+        .flatMap(language => this.getCandidates(repoRoot, language.id, capability))
       const available = candidates.some(candidate =>
         candidate.analyzer.kind === 'heuristic' || this.commandExists(candidate.analyzer.command[0] ?? ''),
       )
@@ -129,13 +140,7 @@ export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
             metadata: { symbolCount: result.symbols.length, kind: candidate.analyzer.kind },
           })
           if (result.symbols.length > 0) {
-            return {
-              items: result.symbols,
-              pluginId: this.id,
-              mode: 'lsp',
-              attempts,
-              error: result.error,
-            }
+            return { items: result.symbols, pluginId: this.id, mode: 'lsp', attempts, error: result.error }
           }
           continue
         }
@@ -150,17 +155,12 @@ export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
             metadata: { symbolCount: symbols.length, kind: candidate.analyzer.kind, mode: 'heuristic' },
           })
           if (symbols.length > 0) {
-            return {
-              items: symbols,
-              pluginId: this.id,
-              mode: 'heuristic',
-              attempts,
-            }
+            return { items: symbols, pluginId: this.id, mode: 'heuristic', attempts }
           }
           continue
         }
 
-        attempts.push(this.unsupportedAttempt(candidate.analyzer.id, candidate.analyzer.kind, 'symbols execution not implemented'))
+        attempts.push(this.unsupportedAttempt(candidate.analyzer.id, candidate.analyzer.kind, 'symbol execution not implemented'))
       } catch (err) {
         attempts.push(this.errorAttempt(candidate.analyzer.id, candidate.analyzer.kind, Date.now() - started, err))
       }
@@ -202,6 +202,22 @@ export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
             return { items: result.diagnostics, pluginId: this.id, attempts }
           }
           continue
+        }
+
+        if (candidate.analyzer.kind === 'quality') {
+          const result = this.executeQualityAnalyzer(candidate.analyzer, ctx.filePath, ctx.repoRoot, language.id)
+          attempts.push({
+            analyzerId: candidate.analyzer.id,
+            analyzerKind: 'quality',
+            status: 'success',
+            durationMs: Date.now() - started,
+            metadata: {
+              diagnosticCount: result.diagnostics.length,
+              kind: candidate.analyzer.kind,
+              exitError: result.error ?? null,
+            },
+          })
+          return { items: result.diagnostics, pluginId: this.id, attempts, error: result.error }
         }
 
         attempts.push(this.unsupportedAttempt(candidate.analyzer.id, candidate.analyzer.kind, 'diagnostics execution not implemented'))
@@ -246,10 +262,7 @@ export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
           })
           if (result.locations.length > 0) {
             return {
-              items: result.locations.map(location => ({
-                path: location.path,
-                range: location.range,
-              })),
+              items: result.locations.map(location => ({ path: location.path, range: location.range })),
               pluginId: this.id,
               attempts,
             }
@@ -322,10 +335,58 @@ export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
     return { items: [], pluginId: this.id, attempts, error: `no-definitions: ${query.filePath}` }
   }
 
+  private executeQualityAnalyzer(
+    analyzer: RegistryAnalyzer,
+    filePath: string,
+    repoRoot: string,
+    languageId: string,
+  ): { diagnostics: PluginDiagnostic[]; error?: string } {
+    const command = analyzer.command.map(arg => (
+      arg
+        .replaceAll('{file}', filePath)
+        .replaceAll('{repo_root}', repoRoot)
+        .replaceAll('{language}', languageId)
+    ))
+    const [bin, ...args] = command
+    if (bin === undefined) {
+      return { diagnostics: [], error: 'missing-command' }
+    }
+
+    const result = spawnSync(bin, args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+
+    if (result.error) {
+      return { diagnostics: [], error: result.error.message }
+    }
+
+    const stderr = (result.stderr ?? '').trim()
+    const stdout = (result.stdout ?? '').trim()
+    const text = [stderr, stdout].filter(Boolean).join('\n').trim()
+    if (result.status === 0) {
+      return { diagnostics: [] }
+    }
+
+    const message = text === '' ? `${analyzer.tool} exited with status ${String(result.status)}` : text
+    return {
+      diagnostics: [{
+        severity: 1,
+        message,
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 0 },
+        },
+      }],
+      error: message,
+    }
+  }
+
   private requireLanguage(query: string): RegistryLanguage | undefined {
     const normalized = query.toLowerCase()
     return this.registry.languages.find(language =>
-      this.languageIds.includes(language.id as SupportedLanguageId) &&
+      !this.excludedLanguageIds.has(language.id) &&
       (language.id === normalized ||
         language.display_name.toLowerCase() === normalized ||
         (language.aliases ?? []).some(alias => alias.toLowerCase() === normalized))
@@ -334,7 +395,7 @@ export class TypeScriptJavaScriptPlugin implements LanguagePlugin {
 
   private findLanguageFromPath(filePath: string): RegistryLanguage | undefined {
     return this.registry.languages.find(language =>
-      this.languageIds.includes(language.id as SupportedLanguageId) &&
+      !this.excludedLanguageIds.has(language.id) &&
       (language.detect.extensions ?? []).some(ext => filePath.endsWith(ext))
     )
   }

@@ -39,11 +39,12 @@ function printFidelity(fidelity: FidelityReport): void {
 
 function printRegistrySummary(
   detectedLanguages: string[],
-  selectedAnalyzers: Array<{ language: string; analyzerId: string; tool: string; available: boolean; capabilities: string[] }>
+  selectedAnalyzers: Array<{ language: string; analyzerId: string; tool: string; available: boolean; capabilities: string[] }>,
+  selectedPlugins: Array<{ language: string; pluginId: string; available: boolean; capabilities: string[]; details?: string }>
 ): void {
   if (detectedLanguages.length === 0) {
     console.log('Detected languages')
-    console.log('  (none matched the analyzer registry)')
+    console.log('  (no plugin-backed languages detected)')
     console.log()
     return
   }
@@ -56,13 +57,25 @@ function printRegistrySummary(
     console.log('Selected analyzers')
     console.log('  (no analyzers selected)')
     console.log()
-    return
+  } else {
+    console.log('Selected analyzers')
+    for (const analyzer of selectedAnalyzers) {
+      const status = analyzer.available ? 'available' : 'missing'
+      console.log(`  ${analyzer.language}:${analyzer.analyzerId}  ${analyzer.tool}  [${status}]  ${analyzer.capabilities.join(', ')}`)
+    }
+    console.log()
   }
 
-  console.log('Selected analyzers')
-  for (const analyzer of selectedAnalyzers) {
-    const status = analyzer.available ? 'available' : 'missing'
-    console.log(`  ${analyzer.language}:${analyzer.analyzerId}  ${analyzer.tool}  [${status}]  ${analyzer.capabilities.join(', ')}`)
+  console.log('Selected plugins')
+  if (selectedPlugins.length === 0) {
+    console.log('  (no plugins selected)')
+    console.log()
+    return
+  }
+  for (const plugin of selectedPlugins) {
+    const status = plugin.available ? 'available' : 'unavailable'
+    const details = plugin.details ? `  ${plugin.details}` : ''
+    console.log(`  ${plugin.language}:${plugin.pluginId}  [${status}]  ${plugin.capabilities.join(', ')}${details}`)
   }
   console.log()
 }
@@ -162,7 +175,7 @@ export default async function run(ctx: CliContext): Promise<void> {
   printChecks(report.checks)
   console.log()
 
-  printRegistrySummary(report.detectedLanguages, report.selectedAnalyzers)
+  printRegistrySummary(report.detectedLanguages, report.selectedAnalyzers, report.selectedPlugins)
   printLastRunCoverage(report.lastRunCoverage)
   printContextEnrichers(report.contextEnrichers)
 
