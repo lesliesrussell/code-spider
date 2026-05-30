@@ -1,6 +1,8 @@
+// code-spider-7ui
 import type { CliContext } from '../types'
 import { DoctorService } from '../services/doctor'
 import type { Check, FidelityReport } from '../services/doctor'
+import { Renderer } from '../services/renderer'
 
 function statusIcon(status: Check['status']): string {
   if (status === 'pass') return '✓'
@@ -12,15 +14,15 @@ function pad(s: string, n: number): string {
   return s.padEnd(n)
 }
 
-function printChecks(checks: Check[]): void {
+function printChecks(render: Renderer, checks: Check[]): void {
   for (const check of checks) {
     const icon = statusIcon(check.status)
     const remedyStr = check.remedy !== undefined ? `  →  ${check.remedy}` : ''
-    console.log(`  ${icon} ${pad(check.name, 16)} ${check.message}${remedyStr}`)
+    render.line(`  ${icon} ${pad(check.name, 16)} ${check.message}${remedyStr}`)
   }
 }
 
-function printFidelity(fidelity: FidelityReport): void {
+function printFidelity(render: Renderer, fidelity: FidelityReport): void {
   const fidelityItems: Array<{ label: string; ok: boolean; remedy?: string }> = [
     { label: 'Structural exploration', ok: fidelity.structural },
     { label: 'Hotspot analysis', ok: fidelity.hotspot },
@@ -33,54 +35,56 @@ function printFidelity(fidelity: FidelityReport): void {
   for (const item of fidelityItems) {
     const icon = item.ok ? '✓' : '✗'
     const remedyStr = (!item.ok && item.remedy !== undefined) ? `  →  ${item.remedy}` : ''
-    console.log(`  ${icon} ${item.label}${remedyStr}`)
+    render.line(`  ${icon} ${item.label}${remedyStr}`)
   }
 }
 
 function printRegistrySummary(
+  render: Renderer,
   detectedLanguages: string[],
   selectedAnalyzers: Array<{ language: string; analyzerId: string; tool: string; available: boolean; capabilities: string[] }>,
   selectedPlugins: Array<{ language: string; pluginId: string; available: boolean; capabilities: string[]; details?: string }>
 ): void {
   if (detectedLanguages.length === 0) {
-    console.log('Detected languages')
-    console.log('  (no plugin-backed languages detected)')
-    console.log()
+    render.subheading('Detected languages')
+    render.line('  (no plugin-backed languages detected)')
+    render.line()
     return
   }
 
-  console.log('Detected languages')
-  console.log(`  ${detectedLanguages.join(', ')}`)
-  console.log()
+  render.subheading('Detected languages')
+  render.line(`  ${detectedLanguages.join(', ')}`)
+  render.line()
 
   if (selectedAnalyzers.length === 0) {
-    console.log('Selected analyzers')
-    console.log('  (no analyzers selected)')
-    console.log()
+    render.subheading('Selected analyzers')
+    render.line('  (no analyzers selected)')
+    render.line()
   } else {
-    console.log('Selected analyzers')
+    render.subheading('Selected analyzers')
     for (const analyzer of selectedAnalyzers) {
       const status = analyzer.available ? 'available' : 'missing'
-      console.log(`  ${analyzer.language}:${analyzer.analyzerId}  ${analyzer.tool}  [${status}]  ${analyzer.capabilities.join(', ')}`)
+      render.line(`  ${analyzer.language}:${analyzer.analyzerId}  ${analyzer.tool}  [${status}]  ${analyzer.capabilities.join(', ')}`)
     }
-    console.log()
+    render.line()
   }
 
-  console.log('Selected plugins')
+  render.subheading('Selected plugins')
   if (selectedPlugins.length === 0) {
-    console.log('  (no plugins selected)')
-    console.log()
+    render.line('  (no plugins selected)')
+    render.line()
     return
   }
   for (const plugin of selectedPlugins) {
     const status = plugin.available ? 'available' : 'unavailable'
     const details = plugin.details ? `  ${plugin.details}` : ''
-    console.log(`  ${plugin.language}:${plugin.pluginId}  [${status}]  ${plugin.capabilities.join(', ')}${details}`)
+    render.line(`  ${plugin.language}:${plugin.pluginId}  [${status}]  ${plugin.capabilities.join(', ')}${details}`)
   }
-  console.log()
+  render.line()
 }
 
 function printCoverageGroup(
+  render: Renderer,
   title: string,
   coverage: Array<{
     capability: string
@@ -91,10 +95,10 @@ function printCoverageGroup(
     statuses: Record<string, number>
   }>,
 ): void {
-  console.log(title)
+  render.subheading(title)
   if (coverage.length === 0) {
-    console.log('  (none)')
-    console.log()
+    render.line('  (none)')
+    render.line()
     return
   }
 
@@ -106,12 +110,13 @@ function printCoverageGroup(
     const summary = item.mode === 'on-demand'
       ? `${item.attemptedCount} queries run`
       : `${item.successCount}/${item.attemptedCount} successful`
-    console.log(`  ${icon} ${item.capability}  ${summary}  [${statusSummary}]`)
+    render.line(`  ${icon} ${item.capability}  ${summary}  [${statusSummary}]`)
   }
-  console.log()
+  render.line()
 }
 
 function printLastRunCoverage(
+  render: Renderer,
   coverage: Array<{
     capability: string
     mode: 'sweep' | 'on-demand'
@@ -119,66 +124,72 @@ function printLastRunCoverage(
     successCount: number
     attemptedCount: number
     statuses: Record<string, number>
-  }>
+  }>,
 ): void {
   if (coverage.length === 0) {
-    console.log('Last run analyzer activity')
-    console.log('  (no analyzer execution data from the latest run)')
-    console.log()
+    render.subheading('Last run analyzer activity')
+    render.line('  (no analyzer execution data from the latest run)')
+    render.line()
     return
   }
 
   const sweepCoverage = coverage.filter(item => item.mode === 'sweep')
   const onDemandCoverage = coverage.filter(item => item.mode === 'on-demand')
-  printCoverageGroup('Last run sweep coverage', sweepCoverage)
-  printCoverageGroup('Last run on-demand activity', onDemandCoverage)
+  printCoverageGroup(render, 'Last run sweep coverage', sweepCoverage)
+  printCoverageGroup(render, 'Last run on-demand activity', onDemandCoverage)
 }
 
 function printContextEnrichers(
+  render: Renderer,
   enrichers: Array<{
     name: string
     available: boolean
     observed: boolean
     details: string
-  }>
+  }>,
 ): void {
-  console.log('Context enrichers')
+  render.heading('Context enrichers')
   if (enrichers.length === 0) {
-    console.log('  (none)')
-    console.log()
+    render.line('  (none)')
+    render.line()
     return
   }
 
   for (const enricher of enrichers) {
     const available = enricher.available ? 'available' : 'unavailable'
     const observed = enricher.observed ? 'observed' : 'not observed'
-    console.log(`  ${enricher.name.padEnd(10)}  [${available}, ${observed}]  ${enricher.details}`)
+    render.line(`  ${enricher.name.padEnd(10)}  [${available}, ${observed}]  ${enricher.details}`)
   }
-  console.log()
+  render.line()
 }
 
 export default async function run(ctx: CliContext): Promise<void> {
-  const scope = ctx.args[0] // 'semantic' | 'repo' | 'perf' | undefined
+  const scope = ctx.args[0]
+  const render = new Renderer(ctx)
   const service = new DoctorService()
   const report = await service.run(ctx.repoRoot, ctx.dbPath, scope)
 
   if (ctx.json) {
-    console.log(JSON.stringify(report, null, 2))
+    render.jsonOutput(report)
     return
   }
 
   const repoLabel = ctx.repoRoot
-  console.log(`code-spider doctor  (${repoLabel})`)
-  console.log()
+  render.heading(`code-spider doctor  (${repoLabel})`)
 
-  console.log('Environment')
-  printChecks(report.checks)
-  console.log()
+  render.heading('Environment')
+  printChecks(render, report.checks)
 
-  printRegistrySummary(report.detectedLanguages, report.selectedAnalyzers, report.selectedPlugins)
-  printLastRunCoverage(report.lastRunCoverage)
-  printContextEnrichers(report.contextEnrichers)
+  printRegistrySummary(render, report.detectedLanguages, report.selectedAnalyzers, report.selectedPlugins)
+  printLastRunCoverage(render, report.lastRunCoverage)
+  printContextEnrichers(render, report.contextEnrichers)
 
-  console.log('Analysis fidelity for this repo')
-  printFidelity(report.fidelity)
+  render.heading('Analysis fidelity for this repo')
+  printFidelity(render, report.fidelity)
+
+  if (!report.fidelity.semanticRefs || !report.fidelity.diagnostics) {
+    render.line()
+    render.line('Note: Some semantic capabilities are degraded.')
+    render.line('      defs/refs results may be limited to indexed symbols.')
+  }
 }
