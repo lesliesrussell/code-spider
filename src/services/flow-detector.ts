@@ -1,4 +1,6 @@
 import { Database } from 'bun:sqlite'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export interface Flow {
   key: string
@@ -27,15 +29,156 @@ interface NodeRow {
   label: string
 }
 
-function confidenceFromHits(count: number): number {
-  if (count >= 4) return 0.9
-  if (count >= 2) return 0.6
-  return 0.3
+// code-spider-9ld
+// A flow is only emitted when at least one STRONG signal corroborates it.
+// Strong signals are high-precision: real API call patterns (ripgrep), a
+// matching dependency in package.json, or a file-naming convention. Symbol-name
+// substring matches are WEAK — they may enrich an already-corroborated flow but
+// can never justify emitting one on their own. Confidence is derived from the
+// number of distinct strong signal categories, not from raw keyword hit counts.
+function confidenceFromStrong(strongSignals: number): number {
+  if (strongSignals >= 3) return 0.9
+  if (strongSignals === 2) return 0.7
+  if (strongSignals === 1) return 0.5
+  return 0
 }
 
-function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+// code-spider-9ld
+class FlowBuilder {
+  readonly nodeKeys: string[] = []
+  readonly evidence: string[] = []
+  private readonly seenNodes = new Set<string>()
+  private strongSignals = 0
+
+  addStrongSignal(): void {
+    this.strongSignals++
+  }
+
+  addNode(key: string): void {
+    if (!this.seenNodes.has(key)) {
+      this.seenNodes.add(key)
+      this.nodeKeys.push(key)
+    }
+  }
+
+  addEvidence(item: string): void {
+    this.evidence.push(item)
+  }
+
+  build(key: string, label: string, kind: string): Flow | null {
+    if (this.strongSignals === 0) return null
+    return {
+      key,
+      label,
+      kind,
+      confidence: confidenceFromStrong(this.strongSignals),
+      nodes: this.nodeKeys.slice(0, 10),
+      evidence: this.evidence.slice(0, 10),
+    }
+  }
 }
+
+// code-spider-9ld
+function readPackageDeps(repoRoot: string): Set<string> {
+  try {
+    const raw = readFileSync(join(repoRoot, 'package.json'), 'utf8')
+    const pkg = JSON.parse(raw) as Record<string, unknown>
+    const deps = new Set<string>()
+    for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+      const section = pkg[field]
+      if (section && typeof section === 'object') {
+        for (const name of Object.keys(section as Record<string, unknown>)) {
+          deps.add(name.toLowerCase())
+        }
+      }
+    }
+    return deps
+  } catch {
+    return new Set<string>()
+  }
+}
+
+// code-spider-9ld
+function hasPackageField(repoRoot: string, field: string): boolean {
+  try {
+    const raw = readFileSync(join(repoRoot, 'package.json'), 'utf8')
+    const pkg = JSON.parse(raw) as Record<string, unknown>
+    return pkg[field] !== undefined
+  } catch {
+    return false
+  }
+}
+
+interface RipgrepHit {
+  path: string
+  snippet: string
+}
+
+// code-spider-9ld
+async function ripgrep(pattern: string, repoRoot: string): Promise<RipgrepHit[]> {
+  try {
+    // Exclude tests/fixtures: they routinely contain example route/event/queue
+    // code as string fixtures, which is not the application's architecture.
+    const proc = Bun.spawn(
+      [
+        'rg', '--json', '-i',
+        '--glob', '!node_modules',
+        '--glob', '!*.test.*',
+        '--glob', '!*.spec.*',
+        '--glob', '!**/test/**',
+        '--glob', '!**/tests/**',
+        '--glob', '!**/__tests__/**',
+        '--glob', '!**/fixtures/**',
+        pattern, repoRoot,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' }
+    )
+    const bytes = await new Response(proc.stdout).arrayBuffer()
+    const output = new TextDecoder().decode(bytes)
+    const hits: RipgrepHit[] = []
+    for (const line of output.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const parsed = JSON.parse(line) as { type: string; data?: { path?: { text?: string }; lines?: { text?: string } } }
+        if (parsed.type === 'match' && parsed.data?.path?.text) {
+          hits.push({
+            path: parsed.data.path.text,
+            snippet: parsed.data.lines?.text?.trim() ?? '',
+          })
+        }
+      } catch {
+        // skip malformed JSON lines
+      }
+    }
+    return hits
+  } catch {
+    // rg not available
+    return []
+  }
+}
+
+function intersects(deps: Set<string>, candidates: string[]): boolean {
+  return candidates.some(name => deps.has(name))
+}
+
+// code-spider-9ld
+// Excludes test, spec, and fixture paths from node/symbol queries — example
+// code in tests is not the application's real architecture.
+function nonTestPath(col = 'path'): string {
+  return `
+  AND ${col} NOT LIKE '%.test.%'
+  AND ${col} NOT LIKE '%.spec.%'
+  AND ${col} NOT LIKE 'test/%'
+  AND ${col} NOT LIKE 'tests/%'
+  AND ${col} NOT LIKE '%/test/%'
+  AND ${col} NOT LIKE '%/tests/%'
+  AND ${col} NOT LIKE '%/__tests__/%'
+  AND ${col} NOT LIKE '%/fixtures/%'`
+}
+
+const ROUTE_FRAMEWORKS = ['express', 'fastify', 'hono', 'koa', '@hapi/hapi', '@nestjs/core', 'next', '@sveltejs/kit', '@remix-run/node', 'restify', 'polka']
+const QUEUE_LIBS = ['bullmq', 'bull', 'bee-queue', 'amqplib', 'amqp-connection-manager', 'kafkajs', 'agenda', 'kue', 'rsmq', '@aws-sdk/client-sqs', 'sqs-consumer']
+const EVENT_LIBS = ['eventemitter3', 'eventemitter2', 'mitt', 'nanoevents', 'rxjs']
 
 export class FlowDetector {
   constructor(private db: Database, private runId: number) {}
@@ -43,11 +186,13 @@ export class FlowDetector {
   async detect(repoRoot: string, nodeRef?: string): Promise<Flow[]> {
     const flows: Flow[] = []
 
-    const routeFlows = await this.detectRoutes(repoRoot)
-    const eventFlows = this.detectEvents()
-    const cliFlows = await this.detectCli(repoRoot)
+    const routeFlow = await this.detectRoutes(repoRoot)
+    const eventFlows = await this.detectEvents(repoRoot)
+    const cliFlow = await this.detectCli(repoRoot)
 
-    flows.push(...routeFlows, ...eventFlows, ...cliFlows)
+    for (const flow of [routeFlow, ...eventFlows, cliFlow]) {
+      if (flow !== null) flows.push(flow)
+    }
 
     // Deduplicate by label
     const seen = new Map<string, Flow>()
@@ -119,273 +264,198 @@ export class FlowDetector {
     return evidence.includes(scope.label)
   }
 
-  private async detectRoutes(repoRoot: string): Promise<Flow[]> {
-    const flows: Flow[] = []
-    const evidence: string[] = []
-    const nodeKeys: string[] = []
+  // Resolve a ripgrep absolute path to a unit node key.
+  private nodeKeyForPath(repoRoot: string, absPath: string): string | null {
+    const relPath = absPath.replace(repoRoot + '/', '')
+    const node = this.db.query<NodeRow, [number, string]>(
+      `SELECT key, path, label FROM nodes WHERE run_id=? AND path=? AND kind='unit' LIMIT 1`
+    ).get(this.runId, relPath)
+    return node?.key ?? null
+  }
 
-    // Try ripgrep for route patterns
-    let rgOutput = ''
-    try {
-      const proc = Bun.spawn(
-        ['rg', '--json', '-i', '--glob', '!node_modules', 'router\\.(get|post|put|delete|patch)|app\\.(get|post|put|delete|patch)', repoRoot],
-        { stdout: 'pipe', stderr: 'pipe' }
-      )
-      const bytes = await new Response(proc.stdout).arrayBuffer()
-      rgOutput = new TextDecoder().decode(bytes)
-    } catch {
-      // rg not available, fall through to symbol query
+  // code-spider-9ld
+  private async detectRoutes(repoRoot: string): Promise<Flow | null> {
+    const builder = new FlowBuilder()
+    const deps = readPackageDeps(repoRoot)
+
+    // STRONG: a real web framework dependency.
+    if (intersects(deps, ROUTE_FRAMEWORKS)) {
+      builder.addStrongSignal()
+      builder.addEvidence(`dependency: web framework (${ROUTE_FRAMEWORKS.find(f => deps.has(f))})`)
     }
 
-    if (rgOutput) {
-      for (const line of rgOutput.split('\n')) {
-        if (!line.trim()) continue
-        try {
-          const parsed = JSON.parse(line) as { type: string; data?: { path?: { text?: string }; lines?: { text?: string } } }
-          if (parsed.type === 'match' && parsed.data?.path?.text) {
-            const filePath = parsed.data.path.text
-            const snippet = parsed.data.lines?.text?.trim() ?? ''
-            evidence.push(`${filePath}: ${snippet}`.slice(0, 120))
-            // Find matching node
-            const node = this.db.query<NodeRow, [number, string]>(
-              `SELECT key, path, label FROM nodes WHERE run_id=? AND path=? AND kind='unit' LIMIT 1`
-            ).get(this.runId, filePath.replace(repoRoot + '/', ''))
-            if (node && !nodeKeys.includes(node.key)) {
-              nodeKeys.push(node.key)
-            }
-          }
-        } catch {
-          // skip malformed JSON lines
-        }
+    // STRONG: actual route-registration call sites.
+    const routeHits = await ripgrep('(router|app|fastify|server)\\.(get|post|put|delete|patch)\\(', repoRoot)
+    if (routeHits.length > 0) {
+      builder.addStrongSignal()
+      for (const hit of routeHits) {
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        const key = this.nodeKeyForPath(repoRoot, hit.path)
+        if (key) builder.addNode(key)
       }
     }
 
-    // Also query symbols for route/handler/controller/endpoint names
-    const routeSymbols = this.db.query<SymbolRow, [number, string, string, string, string]>(
-      `SELECT s.name, s.kind, n.key as node_key, n.path as node_path
-       FROM symbols s
-       JOIN nodes n ON n.id = s.node_id
-       WHERE s.run_id=? AND (
-         s.name LIKE ? OR s.name LIKE ? OR s.name LIKE ? OR s.name LIKE ?
-       ) LIMIT 50`
-    ).all(this.runId, '%route%', '%handler%', '%controller%', '%endpoint%')
-
-    for (const sym of routeSymbols) {
-      evidence.push(`symbol: ${sym.name} (${sym.kind}) in ${sym.node_path ?? sym.node_key}`)
-      if (!nodeKeys.includes(sym.node_key)) {
-        nodeKeys.push(sym.node_key)
-      }
-    }
-
-    // File-based routing: route.ts, routes.ts, [slug].ts, page.tsx
+    // STRONG: file-based routing conventions.
     const routeFileNodes = this.db.query<NodeRow, [number, string, string, string, string, string]>(
       `SELECT key, path, label FROM nodes
        WHERE run_id=? AND kind='unit' AND (
          path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?
-       ) LIMIT 20`
+       )${nonTestPath()} LIMIT 20`
     ).all(this.runId, '%/route.ts', '%/routes.ts', '%/route.tsx', '%/page.tsx', '%/routes.js')
-
-    for (const n of routeFileNodes) {
-      evidence.push(`file: ${n.path ?? n.label}`)
-      if (!nodeKeys.includes(n.key)) {
-        nodeKeys.push(n.key)
+    if (routeFileNodes.length > 0) {
+      builder.addStrongSignal()
+      for (const n of routeFileNodes) {
+        builder.addEvidence(`file: ${n.path ?? n.label}`)
+        builder.addNode(n.key)
       }
     }
 
-    if (evidence.length > 0 || nodeKeys.length > 0) {
-      flows.push({
-        key: 'flow:http-routes',
-        label: 'http-routes',
-        kind: 'request',
-        confidence: confidenceFromHits(evidence.length + nodeKeys.length),
-        nodes: nodeKeys.slice(0, 10),
-        evidence: evidence.slice(0, 10),
-      })
-    }
-
-    return flows
-  }
-
-  private detectEvents(): Flow[] {
-    const flows: Flow[] = []
-
-    const patterns = [
-      { match: ['%queue%', '%worker%', '%job%', '%consumer%', '%producer%'], label: 'queue-workers', kind: 'worker' },
-      { match: ['%event%', '%emit%', '%publish%', '%subscribe%'], label: 'event-bus', kind: 'event' },
-    ]
-
-    for (const pattern of patterns) {
-      const evidence: string[] = []
-      const nodeKeys: string[] = []
-
-      // Check symbols
-      const symbols = this.db.query<SymbolRow, [number, ...string[]]>(
-        `SELECT s.name, s.kind, n.key as node_key, n.path as node_path
-         FROM symbols s
-         JOIN nodes n ON n.id = s.node_id
-         WHERE s.run_id=? AND (${pattern.match.map(() => 's.name LIKE ?').join(' OR ')}) LIMIT 30`
-      ).all(this.runId, ...pattern.match)
-
-      for (const sym of symbols) {
-        evidence.push(`symbol: ${sym.name} (${sym.kind}) in ${sym.node_path ?? sym.node_key}`)
-        if (!nodeKeys.includes(sym.node_key)) {
-          nodeKeys.push(sym.node_key)
-        }
-      }
-
-      // Check file names
-      const fileNodes = this.db.query<NodeRow, [number, ...string[]]>(
-        `SELECT key, path, label FROM nodes
-         WHERE run_id=? AND kind='unit' AND (${pattern.match.map(() => 'path LIKE ?').join(' OR ')}) LIMIT 10`
-      ).all(this.runId, ...pattern.match)
-
-      for (const n of fileNodes) {
-        evidence.push(`file: ${n.path ?? n.label}`)
-        if (!nodeKeys.includes(n.key)) {
-          nodeKeys.push(n.key)
-        }
-      }
-
-      if (evidence.length > 0 || nodeKeys.length > 0) {
-        flows.push({
-          key: `flow:${pattern.label}`,
-          label: pattern.label,
-          kind: pattern.kind,
-          confidence: confidenceFromHits(evidence.length + nodeKeys.length),
-          nodes: nodeKeys.slice(0, 10),
-          evidence: evidence.slice(0, 10),
-        })
-      }
-    }
-
-    return flows
-  }
-
-  private async detectCli(repoRoot: string): Promise<Flow[]> {
-    const flows: Flow[] = []
-    const evidence: string[] = []
-    const nodeKeys: string[] = []
-
-    // Check for CLI patterns via ripgrep
-    let rgOutput = ''
-    try {
-      const proc = Bun.spawn(
-        ['rg', '--json', '-i', '--glob', '!node_modules', 'process\\.argv|parseArgs|commander|yargs', repoRoot],
-        { stdout: 'pipe', stderr: 'pipe' }
-      )
-      const bytes = await new Response(proc.stdout).arrayBuffer()
-      rgOutput = new TextDecoder().decode(bytes)
-    } catch {
-      // fall through
-    }
-
-    if (rgOutput) {
-      const seen = new Set<string>()
-      for (const line of rgOutput.split('\n')) {
-        if (!line.trim()) continue
-        try {
-          const parsed = JSON.parse(line) as { type: string; data?: { path?: { text?: string }; lines?: { text?: string } } }
-          if (parsed.type === 'match' && parsed.data?.path?.text) {
-            const filePath = parsed.data.path.text
-            if (!seen.has(filePath)) {
-              seen.add(filePath)
-              const snippet = parsed.data.lines?.text?.trim() ?? ''
-              evidence.push(`${filePath}: ${snippet}`.slice(0, 120))
-              const relPath = filePath.replace(repoRoot + '/', '')
-              const node = this.db.query<NodeRow, [number, string]>(
-                `SELECT key, path, label FROM nodes WHERE run_id=? AND path=? AND kind='unit' LIMIT 1`
-              ).get(this.runId, relPath)
-              if (node && !nodeKeys.includes(node.key)) {
-                nodeKeys.push(node.key)
-              }
-            }
-          }
-        } catch {
-          // skip
-        }
-      }
-    }
-
-    // CLI entry point files
-    const cliFiles = this.db.query<NodeRow, [number, string, string, string, string]>(
-      `SELECT key, path, label FROM nodes
-       WHERE run_id=? AND kind='unit' AND (
-         path = ? OR path = ? OR path = ? OR path = ?
-       ) LIMIT 10`
-    ).all(this.runId, 'src/index.ts', 'src/cli.ts', 'src/main.ts', 'index.ts')
-
-    for (const n of cliFiles) {
-      evidence.push(`file: ${n.path ?? n.label}`)
-      if (!nodeKeys.includes(n.key)) {
-        nodeKeys.push(n.key)
-      }
-    }
-
-    // CLI-related symbols
-    const cliSymbols = this.db.query<SymbolRow, [number, string, string, string, string]>(
+    // WEAK: symbol names that merely contain route-ish words. Only enrich an
+    // already-corroborated flow; never trigger one alone.
+    const routeSymbols = this.db.query<SymbolRow, [number, string, string, string, string]>(
       `SELECT s.name, s.kind, n.key as node_key, n.path as node_path
        FROM symbols s
        JOIN nodes n ON n.id = s.node_id
-       WHERE s.run_id=? AND (
-         s.name LIKE ? OR s.name LIKE ? OR s.name LIKE ? OR s.name = ?
-       ) LIMIT 20`
-    ).all(this.runId, '%command%', '%Command%', '%cmd%', 'main')
-
-    for (const sym of cliSymbols) {
-      evidence.push(`symbol: ${sym.name} (${sym.kind}) in ${sym.node_path ?? sym.node_key}`)
-      if (!nodeKeys.includes(sym.node_key)) {
-        nodeKeys.push(sym.node_key)
-      }
+       WHERE s.run_id=? AND s.kind IN ('Class','Interface','Function','Method')
+         AND (s.name LIKE ? OR s.name LIKE ? OR s.name LIKE ? OR s.name LIKE ?)
+         ${nonTestPath('n.path')}
+       LIMIT 50`
+    ).all(this.runId, '%route%', '%handler%', '%controller%', '%endpoint%')
+    for (const sym of routeSymbols) {
+      builder.addEvidence(`symbol: ${sym.name} (${sym.kind}) in ${sym.node_path ?? sym.node_key}`)
+      builder.addNode(sym.node_key)
     }
 
-    if (evidence.length > 0 || nodeKeys.length > 0) {
-      // Try to group into per-command flows if we have multiple CLI files
-      // For simplicity, emit one aggregate "cli-commands" flow
-      flows.push({
-        key: 'flow:cli-commands',
-        label: 'cli-commands',
-        kind: 'command',
-        confidence: confidenceFromHits(evidence.length + nodeKeys.length),
-        nodes: nodeKeys.slice(0, 10),
-        evidence: evidence.slice(0, 10),
-      })
-    }
+    return builder.build('flow:http-routes', 'http-routes', 'request')
+  }
 
-    // Also look for individual command files in commands/ dir
-    const commandNodes = this.db.query<NodeRow, [number, string]>(
-      `SELECT key, path, label FROM nodes
-       WHERE run_id=? AND kind='unit' AND path LIKE ? ORDER BY path LIMIT 20`
-    ).all(this.runId, 'src/commands/%')
+  // code-spider-9ld
+  private async detectEvents(repoRoot: string): Promise<Flow[]> {
+    const flows: Flow[] = []
+    const deps = readPackageDeps(repoRoot)
 
-    if (commandNodes.length > 0) {
-      // If we already have cli-commands flow, just add nodes to it
-      const existing = flows.find(f => f.key === 'flow:cli-commands')
-      if (existing) {
-        for (const n of commandNodes) {
-          if (!existing.nodes.includes(n.key)) {
-            existing.nodes.push(n.key)
-          }
-          existing.evidence.push(`command file: ${n.path ?? n.label}`)
-        }
-        existing.nodes = existing.nodes.slice(0, 10)
-        existing.evidence = existing.evidence.slice(0, 10)
-        existing.confidence = confidenceFromHits(existing.evidence.length + existing.nodes.length)
-      } else {
-        const cmdEvidence = commandNodes.map(n => `command file: ${n.path ?? n.label}`)
-        flows.push({
-          key: 'flow:cli-commands',
-          label: 'cli-commands',
-          kind: 'command',
-          confidence: confidenceFromHits(commandNodes.length),
-          nodes: commandNodes.map(n => n.key).slice(0, 10),
-          evidence: cmdEvidence.slice(0, 10),
-        })
-      }
-    }
+    const queue = await this.detectQueueWorkers(repoRoot, deps)
+    if (queue !== null) flows.push(queue)
 
-    // Suppress unused variable warning
-    void slugify
+    const events = await this.detectEventBus(repoRoot, deps)
+    if (events !== null) flows.push(events)
 
     return flows
+  }
+
+  // code-spider-9ld
+  private async detectQueueWorkers(repoRoot: string, deps: Set<string>): Promise<Flow | null> {
+    const builder = new FlowBuilder()
+
+    // STRONG: a dedicated queue/job library.
+    if (intersects(deps, QUEUE_LIBS)) {
+      builder.addStrongSignal()
+      builder.addEvidence(`dependency: queue/job library (${QUEUE_LIBS.find(l => deps.has(l))})`)
+    }
+
+    // STRONG: explicit queue/worker construction.
+    const ctorHits = await ripgrep('new\\s+(Worker|Queue|Consumer|Producer)\\(', repoRoot)
+    if (ctorHits.length > 0) {
+      builder.addStrongSignal()
+      for (const hit of ctorHits) {
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        const key = this.nodeKeyForPath(repoRoot, hit.path)
+        if (key) builder.addNode(key)
+      }
+    }
+
+    // STRONG: worker file convention (not generic "consumer"/"producer", which
+    // are overloaded — e.g. React context consumers or test fixtures).
+    const workerFiles = this.db.query<NodeRow, [number, string, string, string]>(
+      `SELECT key, path, label FROM nodes
+       WHERE run_id=? AND kind='unit' AND (path LIKE ? OR path LIKE ? OR path LIKE ?)${nonTestPath()}
+       LIMIT 10`
+    ).all(this.runId, '%.worker.ts', '%/worker.ts', '%/worker.js')
+    if (workerFiles.length > 0) {
+      builder.addStrongSignal()
+      for (const n of workerFiles) {
+        builder.addEvidence(`file: ${n.path ?? n.label}`)
+        builder.addNode(n.key)
+      }
+    }
+
+    return builder.build('flow:queue-workers', 'queue-workers', 'worker')
+  }
+
+  // code-spider-9ld
+  private async detectEventBus(repoRoot: string, deps: Set<string>): Promise<Flow | null> {
+    const builder = new FlowBuilder()
+
+    // STRONG: a pub/sub or event-emitter library.
+    if (intersects(deps, EVENT_LIBS)) {
+      builder.addStrongSignal()
+      builder.addEvidence(`dependency: event library (${EVENT_LIBS.find(l => deps.has(l))})`)
+    }
+
+    // STRONG: constructing or extending an EventEmitter. Bare `.on(` / `.emit(`
+    // are too common (child-process streams, DOM, sockets) to count as evidence
+    // of an application-level event bus.
+    const emitterHits = await ripgrep('(new\\s+EventEmitter|extends\\s+EventEmitter)', repoRoot)
+    if (emitterHits.length > 0) {
+      builder.addStrongSignal()
+      for (const hit of emitterHits) {
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        const key = this.nodeKeyForPath(repoRoot, hit.path)
+        if (key) builder.addNode(key)
+      }
+    }
+
+    return builder.build('flow:event-bus', 'event-bus', 'event')
+  }
+
+  // code-spider-9ld
+  private async detectCli(repoRoot: string): Promise<Flow | null> {
+    const builder = new FlowBuilder()
+
+    // STRONG: argument-parsing call sites.
+    const argvHits = await ripgrep('process\\.argv|parseArgs|commander|yargs', repoRoot)
+    if (argvHits.length > 0) {
+      builder.addStrongSignal()
+      const seen = new Set<string>()
+      for (const hit of argvHits) {
+        if (seen.has(hit.path)) continue
+        seen.add(hit.path)
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        const key = this.nodeKeyForPath(repoRoot, hit.path)
+        if (key) builder.addNode(key)
+      }
+    }
+
+    // STRONG: a declared CLI binary.
+    if (hasPackageField(repoRoot, 'bin')) {
+      builder.addStrongSignal()
+      builder.addEvidence('package.json: bin entry')
+    }
+
+    // STRONG: a command-per-file directory convention.
+    const commandNodes = this.db.query<NodeRow, [number, string]>(
+      `SELECT key, path, label FROM nodes
+       WHERE run_id=? AND kind='unit' AND path LIKE ?${nonTestPath()} ORDER BY path LIMIT 20`
+    ).all(this.runId, 'src/commands/%')
+    if (commandNodes.length > 0) {
+      builder.addStrongSignal()
+      for (const n of commandNodes) {
+        builder.addEvidence(`command file: ${n.path ?? n.label}`)
+        builder.addNode(n.key)
+      }
+    }
+
+    // CLI entry-point files corroborate but are too generic to stand alone.
+    const cliFiles = this.db.query<NodeRow, [number, string, string, string, string]>(
+      `SELECT key, path, label FROM nodes
+       WHERE run_id=? AND kind='unit' AND (path = ? OR path = ? OR path = ? OR path = ?)
+       LIMIT 10`
+    ).all(this.runId, 'src/index.ts', 'src/cli.ts', 'src/main.ts', 'index.ts')
+    for (const n of cliFiles) {
+      builder.addEvidence(`file: ${n.path ?? n.label}`)
+      builder.addNode(n.key)
+    }
+
+    return builder.build('flow:cli-commands', 'cli-commands', 'command')
   }
 }
