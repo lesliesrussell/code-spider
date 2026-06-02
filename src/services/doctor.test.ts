@@ -51,9 +51,10 @@ describe('DoctorService plugin reporting', () => {
       },
     ])
     expect(report.lastRunCoverage).toEqual([])
-    expect(report.fidelity.symbolNavigation).toBe(true)
-    expect(report.fidelity.semanticRefs).toBe(true)
-    expect(report.fidelity.diagnostics).toBe(true)
+    // code-spider-h25: tools available but no run exercised them yet -> 'warn', not 'pass'
+    expect(report.fidelity.symbolNavigation).toBe('warn')
+    expect(report.fidelity.semanticRefs).toBe('warn')
+    expect(report.fidelity.diagnostics).toBe('warn')
     expect(report.contextEnrichers).toEqual([
       {
         name: 'git',
@@ -89,9 +90,10 @@ describe('DoctorService plugin reporting', () => {
     expect(report.selectedAnalyzers).toEqual([])
     expect(report.selectedPlugins).toEqual([])
     expect(report.lastRunCoverage).toEqual([])
-    expect(report.fidelity.symbolNavigation).toBe(false)
-    expect(report.fidelity.semanticRefs).toBe(false)
-    expect(report.fidelity.diagnostics).toBe(false)
+    // code-spider-h25: no analyzers available and nothing exercised -> 'fail'
+    expect(report.fidelity.symbolNavigation).toBe('fail')
+    expect(report.fidelity.semanticRefs).toBe('fail')
+    expect(report.fidelity.diagnostics).toBe('fail')
   })
 
   test('prefers last-run analyzer coverage over static availability when a run exists', async () => {
@@ -161,9 +163,11 @@ describe('DoctorService plugin reporting', () => {
         statuses: { success: 1 },
       },
     ])
-    expect(report.fidelity.symbolNavigation).toBe(true)
-    expect(report.fidelity.semanticRefs).toBe(true)
-    expect(report.fidelity.diagnostics).toBe(false)
+    // code-spider-h25: symbols+refs exercised and succeeded -> 'pass';
+    // diagnostics exercised but 'unsupported' (never succeeded) -> 'fail'
+    expect(report.fidelity.symbolNavigation).toBe('pass')
+    expect(report.fidelity.semanticRefs).toBe('pass')
+    expect(report.fidelity.diagnostics).toBe('fail')
     expect(report.contextEnrichers).toEqual([
       {
         name: 'git',
@@ -186,7 +190,7 @@ describe('DoctorService plugin reporting', () => {
     ])
   })
 
-  test('falls back to available refs capability when the last run never attempted refs', async () => {
+  test('reports refs as warn (available, unexercised) when the last run never attempted refs', async () => {
     const repoRoot = makeTempRepo('code-spider-doctor-refs-fallback')
     mkdirSync(join(repoRoot, 'src'), { recursive: true })
     writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture' }, null, 2))
@@ -244,7 +248,10 @@ describe('DoctorService plugin reporting', () => {
         statuses: { success: 1 },
       },
     ])
-    expect(report.fidelity.semanticRefs).toBe(true)
+    // code-spider-h25: refs not exercised this run, but the analyzer supports it -> 'warn'
+    expect(report.fidelity.semanticRefs).toBe('warn')
+    expect(report.fidelity.symbolNavigation).toBe('pass')
+    expect(report.fidelity.diagnostics).toBe('pass')
   })
 
   test('reports observed context enrichers from the latest run', async () => {

@@ -1,7 +1,7 @@
 // code-spider-7ui
 import type { CliContext } from '../types'
 import { DoctorService } from '../services/doctor'
-import type { Check, FidelityReport } from '../services/doctor'
+import type { Check, CheckStatus, FidelityReport } from '../services/doctor'
 import { Renderer } from '../services/renderer'
 
 function statusIcon(status: Check['status']): string {
@@ -22,20 +22,22 @@ function printChecks(render: Renderer, checks: Check[]): void {
   }
 }
 
+// code-spider-h25
 function printFidelity(render: Renderer, fidelity: FidelityReport): void {
-  const fidelityItems: Array<{ label: string; ok: boolean; remedy?: string }> = [
-    { label: 'Structural exploration', ok: fidelity.structural },
-    { label: 'Hotspot analysis', ok: fidelity.hotspot },
-    { label: 'Flow heuristics', ok: fidelity.flowHeuristics },
-    { label: 'Symbol navigation', ok: fidelity.symbolNavigation },
-    { label: 'Semantic references', ok: fidelity.semanticRefs },
-    { label: 'Diagnostics', ok: fidelity.diagnostics },
+  const toStatus = (ok: boolean): CheckStatus => (ok ? 'pass' : 'fail')
+  const fidelityItems: Array<{ label: string; status: CheckStatus }> = [
+    { label: 'Structural exploration', status: toStatus(fidelity.structural) },
+    { label: 'Hotspot analysis', status: toStatus(fidelity.hotspot) },
+    { label: 'Flow heuristics', status: toStatus(fidelity.flowHeuristics) },
+    { label: 'Symbol navigation', status: fidelity.symbolNavigation },
+    { label: 'Semantic references', status: fidelity.semanticRefs },
+    { label: 'Diagnostics', status: fidelity.diagnostics },
   ]
 
   for (const item of fidelityItems) {
-    const icon = item.ok ? '✓' : '✗'
-    const remedyStr = (!item.ok && item.remedy !== undefined) ? `  →  ${item.remedy}` : ''
-    render.line(`  ${icon} ${item.label}${remedyStr}`)
+    const icon = item.status === 'pass' ? '✓' : item.status === 'warn' ? '⚠' : '✗'
+    const note = item.status === 'warn' ? '  (available, not exercised in last run)' : ''
+    render.line(`  ${icon} ${item.label}${note}`)
   }
 }
 
@@ -187,7 +189,14 @@ export default async function run(ctx: CliContext): Promise<void> {
   render.heading('Analysis fidelity for this repo')
   printFidelity(render, report.fidelity)
 
-  if (!report.fidelity.semanticRefs || !report.fidelity.diagnostics) {
+  // code-spider-h25
+  const refs = report.fidelity.semanticRefs
+  const diags = report.fidelity.diagnostics
+  if (refs === 'warn' || diags === 'warn') {
+    render.line()
+    render.line('Note: Some semantic capabilities are available but were not exercised.')
+    render.line('      Run: code-spider index --semantic   to verify defs/refs/diagnostics.')
+  } else if (refs === 'fail' || diags === 'fail') {
     render.line()
     render.line('Note: Some semantic capabilities are degraded.')
     render.line('      defs/refs results may be limited to indexed symbols.')

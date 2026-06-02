@@ -20,9 +20,15 @@ export interface FidelityReport {
   structural: boolean
   hotspot: boolean
   flowHeuristics: boolean
-  symbolNavigation: boolean
-  semanticRefs: boolean
-  diagnostics: boolean
+  // code-spider-h25
+  // Semantic capabilities are tri-state. 'pass' = exercised and succeeded in
+  // the last run; 'fail' = exercised but produced nothing, or no analyzer is
+  // available; 'warn' = an analyzer is available but the last run never
+  // exercised it (e.g. a structural-only index, no --semantic). 'warn' must NOT
+  // be read as "works" — it means "unverified this run".
+  symbolNavigation: CheckStatus
+  semanticRefs: CheckStatus
+  diagnostics: CheckStatus
 }
 
 export interface DoctorReport {
@@ -366,13 +372,20 @@ function summarizeLastRunCoverage(db: Database | null, lastRunId: number | null)
   }))
 }
 
-function hasSemanticRefsFidelity(
+// code-spider-h25
+// Report a semantic capability's true state from the LAST RUN, not from static
+// tool availability. If the run exercised it, trust the result; if it didn't,
+// say 'warn' (available but unverified) rather than claiming success.
+function semanticFidelity(
   coverage: DoctorReport['lastRunCoverage'],
+  capabilities: AnalyzerCapability[],
   availableCapabilities: Set<AnalyzerCapability>,
-): boolean {
-  const refsCoverage = coverage.find(item => item.capability === 'refs')
-  if (refsCoverage !== undefined) return refsCoverage.succeeded
-  return availableCapabilities.has('refs')
+): CheckStatus {
+  const exercised = coverage.filter(item => capabilities.includes(item.capability))
+  if (exercised.length > 0) {
+    return exercised.some(item => item.succeeded) ? 'pass' : 'fail'
+  }
+  return capabilities.some(capability => availableCapabilities.has(capability)) ? 'warn' : 'fail'
 }
 
 function summarizeContextEnrichers(
@@ -501,20 +514,16 @@ export class DoctorService {
     ]
 
     const dbExists = existsSync(dbPath)
-    const lastRunCapabilities = new Set(
-      lastRunCoverage.filter(item => item.succeeded).map(item => item.capability)
-    )
-    const effectiveCapabilities = lastRunCoverage.length > 0
-      ? lastRunCapabilities
-      : registryChecks.capabilities
+    const availableCapabilities = registryChecks.capabilities
 
+    // code-spider-h25
     const fidelity: FidelityReport = {
       structural: dbExists && lastRunId !== null,
       hotspot: gitCheck.status === 'pass',
       flowHeuristics: rgCheck.status === 'pass',
-      symbolNavigation: effectiveCapabilities.has('symbols') || effectiveCapabilities.has('defs'),
-      semanticRefs: hasSemanticRefsFidelity(lastRunCoverage, registryChecks.capabilities),
-      diagnostics: effectiveCapabilities.has('diagnostics'),
+      symbolNavigation: semanticFidelity(lastRunCoverage, ['symbols', 'defs'], availableCapabilities),
+      semanticRefs: semanticFidelity(lastRunCoverage, ['refs'], availableCapabilities),
+      diagnostics: semanticFidelity(lastRunCoverage, ['diagnostics'], availableCapabilities),
     }
 
     return {

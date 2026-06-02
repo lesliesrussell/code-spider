@@ -58,9 +58,9 @@ describe('doctor command', () => {
         structural: true,
         hotspot: true,
         flowHeuristics: true,
-        symbolNavigation: true,
-        semanticRefs: true,
-        diagnostics: true,
+        symbolNavigation: 'pass',
+        semanticRefs: 'pass',
+        diagnostics: 'pass',
       },
       contextEnrichers: [
         {
