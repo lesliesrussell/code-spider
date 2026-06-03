@@ -29,6 +29,10 @@ export default async function run(ctx: CliContext): Promise<void> {
       console.log(JSON.stringify({ ...result, enrichment: enrichResult }))
     } else {
       console.log(`✓ Semantic: ${enrichResult.symbolsAdded} symbols, ${enrichResult.diagnosticsAdded} diagnostics`)
+      // code-spider-5rz
+      if (enrichResult.filesSkipped > 0) {
+        console.log(`  Note: ${enrichResult.filesSkipped} files beyond the enrichment cap were skipped`)
+      }
     }
   } else if (ctx.json) {
     console.log(JSON.stringify(result))

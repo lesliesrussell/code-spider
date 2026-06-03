@@ -14,11 +14,22 @@ export interface EnrichOptions {
 
 export interface EnrichResult {
   filesProcessed: number
+  // code-spider-5rz
+  // Files beyond maxFiles that were NOT enriched — surfaced so the cap is
+  // never silent.
+  filesSkipped: number
   symbolsAdded: number
   diagnosticsAdded: number
   analyzersRecorded: number
   errors: number
 }
+
+// code-spider-5rz
+// Per-file volume caps: generated or minified files can yield tens of
+// thousands of symbols/diagnostics, bloating the DB and slowing every query.
+// Truncation is logged via the debug channel.
+const MAX_SYMBOLS_PER_FILE = 2000
+const MAX_DIAGNOSTICS_PER_FILE = 500
 
 export class SemanticEnricher {
   constructor(private readonly runner = new AnalyzerRunner()) {}
@@ -40,6 +51,11 @@ export class SemanticEnricher {
 
     // Cap at maxFiles
     const filesToProcess = unitNodes.slice(0, maxFiles)
+    // code-spider-5rz
+    const filesSkipped = unitNodes.length - filesToProcess.length
+    if (filesSkipped > 0) {
+      debugLog('semantic-enricher', `maxFiles cap (${maxFiles}) skipped ${filesSkipped} of ${unitNodes.length} files`)
+    }
     const analyzersRecorded = this.runner.registerAnalyzers(
       db,
       runId,
@@ -86,7 +102,11 @@ export class SemanticEnricher {
           insertEvidence.run(runId, node.id, null, 'lsp', node.path, null, symbolResult.error, 0)
         }
 
-        for (const sym of symbolResult.symbols) {
+        // code-spider-5rz
+        if (symbolResult.symbols.length > MAX_SYMBOLS_PER_FILE) {
+          debugLog('semantic-enricher', `${node.path}: ${symbolResult.symbols.length} symbols truncated to ${MAX_SYMBOLS_PER_FILE}`)
+        }
+        for (const sym of symbolResult.symbols.slice(0, MAX_SYMBOLS_PER_FILE)) {
           const symbolKey = `${node.path}:${sym.name}`
           const metadata = {
             analyzer_id: symbolResult.analyzerId,
@@ -121,7 +141,11 @@ export class SemanticEnricher {
           insertEvidence.run(runId, node.id, null, 'lsp', node.path, null, diagnosticsResult.error, 0)
         }
         if (diagnosticsResult.analyzerId !== null) {
-          for (const diag of diagnosticsResult.diagnostics) {
+          // code-spider-5rz
+          if (diagnosticsResult.diagnostics.length > MAX_DIAGNOSTICS_PER_FILE) {
+            debugLog('semantic-enricher', `${node.path}: ${diagnosticsResult.diagnostics.length} diagnostics truncated to ${MAX_DIAGNOSTICS_PER_FILE}`)
+          }
+          for (const diag of diagnosticsResult.diagnostics.slice(0, MAX_DIAGNOSTICS_PER_FILE)) {
             const severityStr = severityMap[diag.severity]
             insertDiagnostic.run(
               runId,
@@ -148,6 +172,7 @@ export class SemanticEnricher {
       }
     }
 
-    return { filesProcessed: filesToProcess.length, symbolsAdded, diagnosticsAdded, analyzersRecorded, errors }
+    // code-spider-5rz
+    return { filesProcessed: filesToProcess.length, filesSkipped, symbolsAdded, diagnosticsAdded, analyzersRecorded, errors }
   }
 }
