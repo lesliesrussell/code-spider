@@ -22,6 +22,8 @@ describe('doctor command', () => {
 
     DoctorService.prototype.run = async () => ({
       repoRoot: '/tmp/repo',
+      // code-spider-wa3
+      scope: null,
       dbExists: true,
       lastRunId: 1,
       detectedLanguages: ['typescript'],

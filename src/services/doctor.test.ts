@@ -125,6 +125,31 @@ describe('DoctorService plugin reporting', () => {
     expect(report.recommendations.some(item => item.startsWith('database:'))).toBe(true)
   })
 
+  // code-spider-wa3
+  test('scope filters checks to the requested concern', async () => {
+    const repoRoot = makeTempRepo('code-spider-doctor-scope')
+    writeFileSync(join(repoRoot, 'README.md'), '# fixture\n')
+
+    const dbPath = join(repoRoot, '.code-spider', 'index.db')
+    const perfReport = await new DoctorService().run(repoRoot, dbPath, 'perf')
+    expect(perfReport.scope).toBe('perf')
+    for (const check of perfReport.checks) {
+      expect(['repo-size', 'database']).toContain(check.name)
+    }
+
+    const repoReport = await new DoctorService().run(repoRoot, dbPath, 'repo')
+    expect(repoReport.scope).toBe('repo')
+    for (const check of repoReport.checks) {
+      expect(['git', 'rg', 'database']).toContain(check.name)
+    }
+
+    const semanticReport = await new DoctorService().run(repoRoot, dbPath, 'semantic')
+    expect(semanticReport.scope).toBe('semantic')
+    for (const check of semanticReport.checks) {
+      expect(check.name).toContain(':')
+    }
+  })
+
   test('prefers last-run analyzer coverage over static availability when a run exists', async () => {
     const repoRoot = makeTempRepo('code-spider-doctor-coverage')
     mkdirSync(join(repoRoot, 'src'), { recursive: true })

@@ -13,6 +13,18 @@ import { debugLog } from '../utils/debug'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
+// code-spider-wa3
+// Doctor scopes narrow the report to one concern:
+//   semantic — per-language analyzer readiness and last-run coverage
+//   repo     — environment tooling, database, context enrichers
+//   perf     — repo size and database health
+export type DoctorScope = 'semantic' | 'repo' | 'perf'
+
+// code-spider-wa3
+export function isDoctorScope(value: string): value is DoctorScope {
+  return value === 'semantic' || value === 'repo' || value === 'perf'
+}
+
 export interface Check {
   name: string
   status: CheckStatus
@@ -37,6 +49,8 @@ export interface FidelityReport {
 
 export interface DoctorReport {
   repoRoot: string
+  // code-spider-wa3
+  scope: DoctorScope | null
   dbExists: boolean
   lastRunId: number | null
   detectedLanguages: string[]
@@ -557,8 +571,21 @@ function summarizeContextEnrichers(
   ]
 }
 
+// code-spider-wa3
+function checkMatchesScope(check: Check, scope: DoctorScope): boolean {
+  if (scope === 'semantic') {
+    // Per-language analyzer checks are named `${language}:${analyzerId}`.
+    return check.name.includes(':')
+  }
+  if (scope === 'repo') {
+    return ['git', 'rg', 'database'].includes(check.name)
+  }
+  return ['repo-size', 'database'].includes(check.name)
+}
+
 export class DoctorService {
-  async run(repoRoot: string, dbPath: string, _scope?: string): Promise<DoctorReport> {
+  // code-spider-wa3
+  async run(repoRoot: string, dbPath: string, scope?: DoctorScope): Promise<DoctorReport> {
   const registry = loadDefaultAnalyzerRegistry()
   const plugins = new BuiltinLanguagePluginRegistry(
     registry,
@@ -608,13 +635,16 @@ export class DoctorService {
 
     return {
       repoRoot,
+      // code-spider-wa3
+      scope: scope ?? null,
       dbExists,
       lastRunId,
       detectedLanguages: detectedLanguages.map(language => language.id),
       selectedAnalyzers: registryChecks.selectedAnalyzers,
       selectedPlugins,
       lastRunCoverage,
-      checks,
+      // code-spider-wa3
+      checks: scope === undefined ? checks : checks.filter(check => checkMatchesScope(check, scope)),
       fidelity,
       contextEnrichers,
       // code-spider-2ak

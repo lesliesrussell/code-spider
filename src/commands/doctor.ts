@@ -1,7 +1,7 @@
 // code-spider-7ui
 import type { CliContext } from '../types'
-import { DoctorService } from '../services/doctor'
-import type { Check, CheckStatus, FidelityReport } from '../services/doctor'
+import { DoctorService, isDoctorScope } from '../services/doctor'
+import type { Check, CheckStatus, DoctorScope, FidelityReport } from '../services/doctor'
 import { Renderer } from '../services/renderer'
 
 function statusIcon(status: Check['status']): string {
@@ -166,8 +166,21 @@ function printContextEnrichers(
 }
 
 export default async function run(ctx: CliContext): Promise<void> {
-  const scope = ctx.args[0]
   const render = new Renderer(ctx)
+
+  // code-spider-wa3
+  const scopeArg = ctx.args[0]
+  let scope: DoctorScope | undefined
+  if (scopeArg !== undefined) {
+    if (isDoctorScope(scopeArg)) {
+      scope = scopeArg
+    } else {
+      render.error(`Unknown doctor scope: ${scopeArg}`, {
+        hint: 'Usage: code-spider doctor [semantic|repo|perf] [--json]',
+      })
+    }
+  }
+
   const service = new DoctorService()
   const report = await service.run(ctx.repoRoot, ctx.dbPath, scope)
 
@@ -177,17 +190,37 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   const repoLabel = ctx.repoRoot
-  render.heading(`code-spider doctor  (${repoLabel})`)
+  // code-spider-wa3
+  render.heading(`code-spider doctor${scope !== undefined ? ` [${scope}]` : ''}  (${repoLabel})`)
 
-  render.heading('Environment')
-  printChecks(render, report.checks)
+  // code-spider-wa3
+  // Scope narrows which sections render; checks are pre-filtered by the
+  // service so JSON and human output agree.
+  const showEnvironment = scope === undefined || report.checks.length > 0
+  const showRegistry = scope === undefined || scope === 'semantic'
+  const showCoverage = scope === undefined || scope === 'semantic'
+  const showEnrichers = scope === undefined || scope === 'repo'
+  const showFidelity = scope === undefined || scope !== 'perf'
 
-  printRegistrySummary(render, report.detectedLanguages, report.selectedAnalyzers, report.selectedPlugins)
-  printLastRunCoverage(render, report.lastRunCoverage)
-  printContextEnrichers(render, report.contextEnrichers)
+  if (showEnvironment) {
+    render.heading('Environment')
+    printChecks(render, report.checks)
+  }
 
-  render.heading('Analysis fidelity for this repo')
-  printFidelity(render, report.fidelity)
+  if (showRegistry) {
+    printRegistrySummary(render, report.detectedLanguages, report.selectedAnalyzers, report.selectedPlugins)
+  }
+  if (showCoverage) {
+    printLastRunCoverage(render, report.lastRunCoverage)
+  }
+  if (showEnrichers) {
+    printContextEnrichers(render, report.contextEnrichers)
+  }
+
+  if (showFidelity) {
+    render.heading('Analysis fidelity for this repo')
+    printFidelity(render, report.fidelity)
+  }
 
   // code-spider-2ak
   // Recommendations come from the service so --json consumers see the same
