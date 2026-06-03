@@ -1,6 +1,7 @@
-import { execSync } from 'node:child_process'
 // code-spider-bik
 import { debugLog } from '../utils/debug'
+// code-spider-ijq
+import { commandExists } from '../utils/exec'
 import type { Database } from 'bun:sqlite'
 import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
 import type { AnalyzerCapability, AnalyzerRegistryDocument } from '../analyzer-registry'
@@ -63,15 +64,14 @@ export interface AnalyzerRunnerOptions {
   lspAdapter?: Pick<LspAdapter, 'getSymbols' | 'getDiagnostics' | 'getReferences' | 'getDefinitions'>
 }
 
+// code-spider-ijq
 function defaultCommandExists(bin: string): boolean {
-  try {
-    execSync(`which ${bin}`, { stdio: 'ignore', timeout: 2000 })
-    return true
-  } catch (err) {
+  const found = commandExists(bin)
+  if (!found) {
     // code-spider-bik
-    debugLog('analyzer-runner', `binary not on PATH: ${bin}`, err)
-    return false
+    debugLog('analyzer-runner', `binary not on PATH: ${bin}`)
   }
+  return found
 }
 
 export class AnalyzerRunner {

@@ -10,6 +10,8 @@ import { openDb } from '../db/init'
 import { buildIgnoreRules, shouldIgnoreFile } from '../adapters/filesystem'
 // code-spider-bik
 import { debugLog } from '../utils/debug'
+// code-spider-ijq
+import { commandExists } from '../utils/exec'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
@@ -591,7 +593,8 @@ export class DoctorService {
   const registry = loadDefaultAnalyzerRegistry()
   const plugins = new BuiltinLanguagePluginRegistry(
     registry,
-    (bin: string) => tryExec(`which ${bin}`) !== null,
+    // code-spider-ijq
+    (bin: string) => commandExists(bin),
   )
     const gitCheck = checkGit(repoRoot)
     const rgCheck = checkRg()
