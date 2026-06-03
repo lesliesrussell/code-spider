@@ -20,7 +20,25 @@ export default async function run(ctx: CliContext): Promise<void> {
   const limitFlag = ctx.flags['limit']
   const limit = typeof limitFlag === 'string' ? parseInt(limitFlag, 10) : 10
 
-  const related = await new RelatedService(db, runId, ctx.repoRoot).getRelated(nodeRef, limit)
+  // code-spider-tn8
+  // --kind filters results to one relationship signal.
+  const RELATED_KINDS = ['topology', 'symbols', 'docs', 'git', 'issues', 'flows']
+  const kindFlag = ctx.flags['kind']
+  let kind: string | undefined
+  if (kindFlag !== undefined) {
+    if (typeof kindFlag !== 'string' || !RELATED_KINDS.includes(kindFlag)) {
+      console.error(`Unknown related kind: ${String(kindFlag)}`)
+      console.error(`Available: ${RELATED_KINDS.join(', ')}`)
+      process.exit(1)
+    }
+    kind = kindFlag
+  }
+
+  const allRelated = await new RelatedService(db, runId, ctx.repoRoot).getRelated(nodeRef, limit)
+  // code-spider-tn8
+  const related = kind === undefined
+    ? allRelated
+    : allRelated.filter(item => item.signals.includes(kind))
 
   if (ctx.json) {
     console.log(JSON.stringify(related, null, 2))

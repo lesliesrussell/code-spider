@@ -85,7 +85,7 @@ code-spider
   zones [--limit <n>]
   show <node-ref> [--semantic] [--evidence]
   children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
-  related <node-ref> [--limit <n>]
+  related <node-ref> [--kind <signal>] [--limit <n>]
   flows [<node-ref>] [--limit <n>]
   refs <symbol-or-node>
   defs <symbol-or-node>
@@ -97,8 +97,7 @@ code-spider
 Every command supports `--json` (machine-readable output), `--repo <path>`, and `--db <path>`.
 
 Planned per PRD but **not yet implemented** (do not document as working):
-`index --incremental` (code-spider-oun), `overview --run <id>`,
-`zones --kind`, `related --kind <edge-kind>`.
+`index --incremental` (code-spider-oun), `overview --run <id>`, `zones --kind`.
 
 ## Key Design Constraints
 

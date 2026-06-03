@@ -22,7 +22,8 @@ Commands:
                                        --evidence lifts the 5-row evidence cap
   children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
                                        List child nodes
-  related <node-ref> [--limit <n>]     List related nodes
+  related <node-ref> [--kind topology|symbols|docs|git|issues|flows] [--limit <n>]
+                                       List related nodes, optionally by one signal
   flows [<node-ref>] [--limit <n>]     List detected flows
   refs <symbol>                        Find references
   defs <symbol>                        Find definitions
