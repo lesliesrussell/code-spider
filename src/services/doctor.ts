@@ -130,7 +130,13 @@ function checkRg(): Check {
   }
 }
 
-function walkRepoFiles(root: string, maxEntries = 2000): string[] {
+// code-spider-ok8
+// Bounds the doctor's repo walk. Language detection only needs file names, so
+// the walk is cheap — but truncation can hide languages living deep in large
+// repos, so it is logged when it happens.
+const MAX_WALK_ENTRIES = 20000
+
+function walkRepoFiles(root: string, maxEntries = MAX_WALK_ENTRIES): string[] {
   const results: string[] = []
   const queue = ['']
   // code-spider-c6v
@@ -164,6 +170,11 @@ function walkRepoFiles(root: string, maxEntries = 2000): string[] {
         if (results.length >= maxEntries) break
       }
     }
+  }
+
+  // code-spider-ok8
+  if (results.length >= maxEntries) {
+    debugLog('doctor', `repo walk truncated at ${maxEntries} files — language detection may be incomplete`)
   }
 
   return results
@@ -367,6 +378,8 @@ function checkRepoSize(_repoRoot: string, db: Database | null, lastRunId: number
         name: 'repo-size',
         status: 'warn',
         message: `${count} files indexed — large repo, analysis may be slow`,
+        // code-spider-ok8
+        remedy: 'Use code-spider index --incremental for re-scans, and ignore generated dirs via .code-spider/config.yaml',
       }
     }
     return { name: 'repo-size', status: 'pass', message: `${count} files indexed` }
@@ -439,7 +452,15 @@ function summarizeContextEnrichers(
   gitAvailable: boolean,
 ): DoctorReport['contextEnrichers'] {
   const markdownAvailable = hasMarkdownFiles(repoRoot)
-  const beadsAvailable = existsSync(join(repoRoot, '.beads')) && tryExec('bd --version') !== null
+  // code-spider-ok8
+  // Distinguish "no beads workspace" from "workspace present but bd not on
+  // PATH" — the latter must not read as "beads unused".
+  const beadsWorkspace = existsSync(join(repoRoot, '.beads'))
+  const bdOnPath = beadsWorkspace && tryExec('bd --version') !== null
+  const beadsAvailable = beadsWorkspace && bdOnPath
+  const beadsUnavailableDetails = beadsWorkspace
+    ? '.beads workspace found but bd is not on PATH'
+    : 'no beads workspace'
 
   if (db === null || lastRunId === null) {
     return [
@@ -459,7 +480,8 @@ function summarizeContextEnrichers(
         name: 'beads',
         available: beadsAvailable,
         observed: false,
-        details: beadsAvailable ? 'no completed run yet' : 'no beads workspace or bd command unavailable',
+        // code-spider-ok8
+        details: beadsAvailable ? 'no completed run yet' : beadsUnavailableDetails,
       },
     ]
   }
@@ -522,7 +544,10 @@ function summarizeContextEnrichers(
       name: 'beads',
       available: beadsAvailable,
       observed: issues > 0 || trackedBy > 0 || issueDeps > 0,
-      details: `issues:${issues}, tracked:${trackedBy}, deps:${issueDeps}`,
+      // code-spider-ok8
+      details: beadsAvailable
+        ? `issues:${issues}, tracked:${trackedBy}, deps:${issueDeps}`
+        : `${beadsUnavailableDetails} (issues:${issues}, tracked:${trackedBy}, deps:${issueDeps})`,
     },
   ]
 }

@@ -72,7 +72,8 @@ describe('DoctorService plugin reporting', () => {
         name: 'beads',
         available: false,
         observed: false,
-        details: 'no beads workspace or bd command unavailable',
+        // code-spider-ok8
+        details: 'no beads workspace',
       },
     ])
   })
@@ -210,7 +211,8 @@ describe('DoctorService plugin reporting', () => {
         name: 'beads',
         available: false,
         observed: false,
-        details: 'issues:0, tracked:0, deps:0',
+        // code-spider-ok8
+        details: 'no beads workspace (issues:0, tracked:0, deps:0)',
       },
     ])
   })
@@ -338,7 +340,8 @@ describe('DoctorService plugin reporting', () => {
         name: 'beads',
         available: false,
         observed: true,
-        details: 'issues:1, tracked:1, deps:1',
+        // code-spider-ok8
+        details: 'no beads workspace (issues:1, tracked:1, deps:1)',
       },
     ])
   })
