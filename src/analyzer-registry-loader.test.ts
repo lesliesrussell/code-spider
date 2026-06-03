@@ -1,5 +1,37 @@
 import { describe, expect, test } from 'bun:test'
-import { AnalyzerRegistryError, loadDefaultAnalyzerRegistry, parseAnalyzerRegistry } from './analyzer-registry-loader'
+// code-spider-d12
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { AnalyzerRegistryError, loadAnalyzerRegistrySafeFromPath, loadDefaultAnalyzerRegistry, parseAnalyzerRegistry } from './analyzer-registry-loader'
+
+// code-spider-d12
+describe('loadAnalyzerRegistrySafeFromPath', () => {
+  test('falls back to an empty registry on malformed yaml and reports the error', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'code-spider-registry-'))
+    try {
+      const path = join(dir, 'analyzers.yaml')
+      writeFileSync(path, 'languages:\n  - id: zig\n    nonsense_field: true\n')
+      const result = loadAnalyzerRegistrySafeFromPath(path)
+      expect(result.error).toContain('Unknown language field')
+      expect(result.registry.languages).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('missing file falls back with an error, never throws', () => {
+    const result = loadAnalyzerRegistrySafeFromPath('/nonexistent/analyzers.yaml')
+    expect(result.error).toContain('not found')
+    expect(result.registry.languages).toEqual([])
+  })
+
+  test('valid file loads with no error', () => {
+    const result = loadAnalyzerRegistrySafeFromPath(join(import.meta.dir, '..', 'config', 'analyzers.yaml'))
+    expect(result.error).toBeUndefined()
+    expect(result.registry.languages.length).toBeGreaterThan(0)
+  })
+})
 
 describe('analyzer registry loader', () => {
   test('loads the shipped registry', () => {

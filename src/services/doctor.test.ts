@@ -146,6 +146,8 @@ describe('DoctorService plugin reporting', () => {
     const semanticReport = await new DoctorService().run(repoRoot, dbPath, 'semantic')
     expect(semanticReport.scope).toBe('semantic')
     for (const check of semanticReport.checks) {
+      // code-spider-d12: registry health belongs to the semantic scope too
+      if (check.name === 'analyzer-registry') continue
       expect(check.name).toContain(':')
     }
   })

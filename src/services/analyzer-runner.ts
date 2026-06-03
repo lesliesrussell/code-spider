@@ -3,7 +3,8 @@ import { debugLog } from '../utils/debug'
 // code-spider-ijq
 import { commandExists } from '../utils/exec'
 import type { Database } from 'bun:sqlite'
-import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
+// code-spider-d12
+import { loadDefaultAnalyzerRegistrySafe } from '../analyzer-registry-loader'
 import type { AnalyzerCapability, AnalyzerRegistryDocument } from '../analyzer-registry'
 import { LspAdapter, type LspDiagnostic, type LspLocation, type LspSymbol } from '../adapters/lsp'
 import { BuiltinLanguagePluginRegistry } from '../language-plugin-registry'
@@ -82,7 +83,16 @@ export class AnalyzerRunner {
   private readonly analyzerRowCache = new Map<string, number>()
 
   constructor(options: AnalyzerRunnerOptions = {}) {
-    this.registry = options.registry ?? loadDefaultAnalyzerRegistry()
+    // code-spider-d12
+    let registry = options.registry
+    if (registry === undefined) {
+      const loaded = loadDefaultAnalyzerRegistrySafe()
+      if (loaded.error !== undefined) {
+        debugLog('analyzer-runner', `analyzers.yaml unusable, semantic analyzers disabled: ${loaded.error}`)
+      }
+      registry = loaded.registry
+    }
+    this.registry = registry
     this.commandExists = options.commandExists ?? defaultCommandExists
     this.lsp = options.lspAdapter ?? new LspAdapter()
     this.plugins = new BuiltinLanguagePluginRegistry(this.registry, this.commandExists, this.lsp)

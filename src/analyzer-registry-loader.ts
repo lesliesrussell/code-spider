@@ -435,3 +435,37 @@ export function loadDefaultAnalyzerRegistry(): AnalyzerRegistryDocument {
   const defaultPath = resolve(import.meta.dir, '..', 'config', 'analyzers.yaml')
   return loadAnalyzerRegistryFromPath(defaultPath)
 }
+
+// code-spider-d12
+export interface AnalyzerRegistryLoadResult {
+  registry: AnalyzerRegistryDocument
+  // Parse/read error when the fallback registry was substituted.
+  error?: string
+}
+
+// code-spider-d12
+// Fail-soft entry point: a user-edited analyzers.yaml with a syntax slip must
+// not crash doctor and every semantic command. The strict parser still throws
+// (validation stays sharp); this wrapper substitutes an empty registry —
+// structural-only mode keeps working — and reports the error so doctor can
+// surface it.
+export function loadAnalyzerRegistrySafeFromPath(path: string): AnalyzerRegistryLoadResult {
+  try {
+    return { registry: loadAnalyzerRegistryFromPath(path) }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      registry: {
+        version: ANALYZER_REGISTRY_VERSION,
+        capabilities: [...ANALYZER_CAPABILITIES],
+        languages: [],
+      },
+      error: message,
+    }
+  }
+}
+
+// code-spider-d12
+export function loadDefaultAnalyzerRegistrySafe(): AnalyzerRegistryLoadResult {
+  return loadAnalyzerRegistrySafeFromPath(resolve(import.meta.dir, '..', 'config', 'analyzers.yaml'))
+}

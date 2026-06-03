@@ -2,7 +2,8 @@ import { execSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
-import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
+// code-spider-d12
+import { loadDefaultAnalyzerRegistrySafe } from '../analyzer-registry-loader'
 import type { AnalyzerCapability, AnalyzerRegistryDocument, RegistryLanguage } from '../analyzer-registry'
 import { BuiltinLanguagePluginRegistry } from '../language-plugin-registry'
 import { openDb } from '../db/init'
@@ -579,7 +580,8 @@ function summarizeContextEnrichers(
 function checkMatchesScope(check: Check, scope: DoctorScope): boolean {
   if (scope === 'semantic') {
     // Per-language analyzer checks are named `${language}:${analyzerId}`.
-    return check.name.includes(':')
+    // code-spider-d12
+    return check.name.includes(':') || check.name === 'analyzer-registry'
   }
   if (scope === 'repo') {
     return ['git', 'rg', 'database'].includes(check.name)
@@ -590,7 +592,9 @@ function checkMatchesScope(check: Check, scope: DoctorScope): boolean {
 export class DoctorService {
   // code-spider-wa3
   async run(repoRoot: string, dbPath: string, scope?: DoctorScope): Promise<DoctorReport> {
-  const registry = loadDefaultAnalyzerRegistry()
+  // code-spider-d12
+  const registryLoad = loadDefaultAnalyzerRegistrySafe()
+  const registry = registryLoad.registry
   const plugins = new BuiltinLanguagePluginRegistry(
     registry,
     // code-spider-ijq
@@ -598,6 +602,15 @@ export class DoctorService {
   )
     const gitCheck = checkGit(repoRoot)
     const rgCheck = checkRg()
+    // code-spider-d12
+    const registryCheck: Check = registryLoad.error === undefined
+      ? { name: 'analyzer-registry', status: 'pass', message: `${registry.languages.length} languages configured` }
+      : {
+          name: 'analyzer-registry',
+          status: 'fail',
+          message: `analyzers.yaml unusable — semantic analyzers disabled (${registryLoad.error})`,
+          remedy: 'Fix config/analyzers.yaml syntax; structural indexing still works meanwhile',
+        }
     const { check: dbCheck, db, lastRunId, fileCount: _fileCount } = checkDatabase(dbPath)
     const detectedLanguages = detectLanguages(repoRoot, registry, plugins)
     const registryChecks = checkSelectedAnalyzers(repoRoot, detectedLanguages, plugins)
@@ -615,6 +628,8 @@ export class DoctorService {
       gitCheck,
       rgCheck,
       dbCheck,
+      // code-spider-d12
+      registryCheck,
       ...registryChecks.checks,
       repoSizeCheck,
     ]
