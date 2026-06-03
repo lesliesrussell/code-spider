@@ -15,7 +15,7 @@ Commands:
   index [path] [--semantic] [--max-files <n|all>]
                                        Index a repository; --semantic adds symbol enrichment
                                        (default cap 100 files; --max-files all lifts it)
-  overview                             Repository overview
+  overview [--run <id>]                Repository overview (default: latest run)
   zones [--kind <language>] [--limit <n>]
                                        List top-level zones, optionally by dominant language
   show <node-ref> [--semantic] [--evidence]

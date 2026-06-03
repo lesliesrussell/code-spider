@@ -12,7 +12,27 @@ function rpad(s: string, n: number): string {
 
 export default async function run(ctx: CliContext): Promise<void> {
   const db = openDb(ctx.dbPath)
-  const runId = Navigator.latestRunId(db, ctx.repoRoot)
+
+  // code-spider-47p
+  // --run <id> selects a historical run; default stays the latest.
+  let runId: number | null
+  const runFlag = ctx.flags['run']
+  if (runFlag !== undefined) {
+    const parsed = typeof runFlag === 'string' ? parseInt(runFlag, 10) : NaN
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      console.error(`Invalid --run value: ${String(runFlag)} (expected a run id)`)
+      process.exit(1)
+    }
+    if (!Navigator.runExists(db, ctx.repoRoot, parsed)) {
+      const available = Navigator.listRunIds(db, ctx.repoRoot)
+      console.error(`Run #${parsed} not found for ${ctx.repoRoot}`)
+      console.error(available.length > 0 ? `Available runs: ${available.join(', ')}` : 'No completed runs. Run: code-spider index')
+      process.exit(1)
+    }
+    runId = parsed
+  } else {
+    runId = Navigator.latestRunId(db, ctx.repoRoot)
+  }
   if (runId === null) {
     console.error('No index found. Run: code-spider index')
     process.exit(1)

@@ -81,7 +81,7 @@ code-spider
   doctor [semantic|repo|perf]
   inspect [path]
   index [path] [--semantic]
-  overview
+  overview [--run <id>]
   zones [--kind <language>] [--limit <n>]
   show <node-ref> [--semantic] [--evidence]
   children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
@@ -97,7 +97,7 @@ code-spider
 Every command supports `--json` (machine-readable output), `--repo <path>`, and `--db <path>`.
 
 Planned per PRD but **not yet implemented** (do not document as working):
-`index --incremental` (code-spider-oun), `overview --run <id>`.
+`index --incremental` (code-spider-oun).
 
 ## Key Design Constraints
 

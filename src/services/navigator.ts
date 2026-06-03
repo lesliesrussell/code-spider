@@ -63,6 +63,21 @@ export class Navigator {
     return row?.id ?? null
   }
 
+  // code-spider-47p
+  static runExists(db: Database, repoRoot: string, runId: number): boolean {
+    const row = db.query<{ id: number }, [number, string]>(
+      'SELECT id FROM runs WHERE id=? AND repo_root=? AND completed_at IS NOT NULL'
+    ).get(runId, repoRoot)
+    return row !== null && row !== undefined
+  }
+
+  // code-spider-47p
+  static listRunIds(db: Database, repoRoot: string, limit = 10): number[] {
+    return db.query<{ id: number }, [string, number]>(
+      'SELECT id FROM runs WHERE repo_root=? AND completed_at IS NOT NULL ORDER BY id DESC LIMIT ?'
+    ).all(repoRoot, limit).map(row => row.id)
+  }
+
   getNode(key: string): NodeRow | null {
     return this.db.query<NodeRow, [number, string]>(
       `SELECT ${NODE_SELECT} FROM nodes WHERE run_id=? AND key=?`
