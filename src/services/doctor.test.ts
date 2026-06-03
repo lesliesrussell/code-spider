@@ -120,6 +120,9 @@ describe('DoctorService plugin reporting', () => {
     expect(dbCheck?.remedy).toContain('code-spider index')
     expect(report.fidelity.structural).toBe(false)
     expect(report.fidelity.flowHeuristics).toBe(false)
+    // code-spider-2ak: remedies surface as machine-readable recommendations
+    expect(report.recommendations.some(item => item.includes('code-spider index'))).toBe(true)
+    expect(report.recommendations.some(item => item.startsWith('database:'))).toBe(true)
   })
 
   test('prefers last-run analyzer coverage over static availability when a run exists', async () => {

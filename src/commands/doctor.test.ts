@@ -62,6 +62,8 @@ describe('doctor command', () => {
         semanticRefs: 'pass',
         diagnostics: 'pass',
       },
+      // code-spider-2ak
+      recommendations: [],
       contextEnrichers: [
         {
           name: 'git',

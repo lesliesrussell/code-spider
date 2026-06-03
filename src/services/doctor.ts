@@ -70,6 +70,11 @@ export interface DoctorReport {
     observed: boolean
     details: string
   }>
+  // code-spider-2ak
+  // Actionable next steps derived from fidelity warn/fail states and failing
+  // check remedies. Present in --json so agents don't have to interpret
+  // tri-state values to know what to do next.
+  recommendations: string[]
 }
 
 interface RunRow {
@@ -612,6 +617,32 @@ export class DoctorService {
       checks,
       fidelity,
       contextEnrichers,
+      // code-spider-2ak
+      recommendations: buildRecommendations(checks, fidelity),
     }
   }
+}
+
+// code-spider-2ak
+function buildRecommendations(checks: Check[], fidelity: FidelityReport): string[] {
+  const recommendations: string[] = []
+
+  if (!fidelity.structural) {
+    recommendations.push('No readable index — run: code-spider index')
+  }
+
+  const semanticStates = [fidelity.symbolNavigation, fidelity.semanticRefs, fidelity.diagnostics]
+  if (semanticStates.includes('warn')) {
+    recommendations.push('Semantic capabilities are available but unverified — run: code-spider index --semantic')
+  } else if (semanticStates.includes('fail')) {
+    recommendations.push('Semantic capabilities are degraded — defs/refs results may be limited to indexed symbols')
+  }
+
+  for (const check of checks) {
+    if (check.status !== 'pass' && check.remedy !== undefined) {
+      recommendations.push(`${check.name}: ${check.remedy}`)
+    }
+  }
+
+  return recommendations
 }

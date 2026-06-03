@@ -189,16 +189,14 @@ export default async function run(ctx: CliContext): Promise<void> {
   render.heading('Analysis fidelity for this repo')
   printFidelity(render, report.fidelity)
 
-  // code-spider-h25
-  const refs = report.fidelity.semanticRefs
-  const diags = report.fidelity.diagnostics
-  if (refs === 'warn' || diags === 'warn') {
+  // code-spider-2ak
+  // Recommendations come from the service so --json consumers see the same
+  // guidance; this block only renders them for humans.
+  if (report.recommendations.length > 0) {
     render.line()
-    render.line('Note: Some semantic capabilities are available but were not exercised.')
-    render.line('      Run: code-spider index --semantic   to verify defs/refs/diagnostics.')
-  } else if (refs === 'fail' || diags === 'fail') {
-    render.line()
-    render.line('Note: Some semantic capabilities are degraded.')
-    render.line('      defs/refs results may be limited to indexed symbols.')
+    render.line('Recommendations:')
+    for (const recommendation of report.recommendations) {
+      render.line(`  - ${recommendation}`)
+    }
   }
 }
