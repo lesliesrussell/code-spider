@@ -6,6 +6,8 @@ import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
 import type { AnalyzerCapability, AnalyzerRegistryDocument, RegistryLanguage } from '../analyzer-registry'
 import { BuiltinLanguagePluginRegistry } from '../language-plugin-registry'
 import { openDb } from '../db/init'
+// code-spider-c6v
+import { buildIgnoreRules, shouldIgnoreFile } from '../adapters/filesystem'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
@@ -127,7 +129,8 @@ function checkRg(): Check {
 function walkRepoFiles(root: string, maxEntries = 2000): string[] {
   const results: string[] = []
   const queue = ['']
-  const ignored = new Set(['.git', 'node_modules', '.code-spider', '.beads', '.claude', '.nardo', '.omc'])
+  // code-spider-c6v
+  const rules = buildIgnoreRules(root)
 
   while (queue.length > 0 && results.length < maxEntries) {
     const relDir = queue.shift()
@@ -143,11 +146,14 @@ function walkRepoFiles(root: string, maxEntries = 2000): string[] {
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (ignored.has(entry.name)) continue
+        // code-spider-c6v
+        if (rules.dirNames.has(entry.name)) continue
         const childRel = relDir === '' ? entry.name : `${relDir}/${entry.name}`
         queue.push(childRel)
       } else if (entry.isFile()) {
         const childRel = relDir === '' ? entry.name : `${relDir}/${entry.name}`
+        // code-spider-c6v
+        if (shouldIgnoreFile(childRel, rules)) continue
         results.push(childRel)
         if (results.length >= maxEntries) break
       }

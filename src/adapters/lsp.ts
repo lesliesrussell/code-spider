@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
+import { relative } from 'node:path'
+// code-spider-c6v
+import { buildIgnoreRules, shouldIgnoreFile } from './filesystem'
 
 export interface LspSymbol {
   name: string
@@ -72,18 +75,21 @@ function uriToPath(uri: string): string {
   return uri.startsWith('file://') ? uri.slice('file://'.length) : uri
 }
 
-export function collectWorkspaceFiles(repoRoot: string, extensions: string[], ignoreDirs = new Set(['.git', '.code-spider', 'node_modules'])): string[] {
+// code-spider-c6v
+export function collectWorkspaceFiles(repoRoot: string, extensions: string[]): string[] {
   const results: string[] = []
+  const rules = buildIgnoreRules(repoRoot)
 
   const visit = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (ignoreDirs.has(entry.name)) continue
       const fullPath = `${dir}/${entry.name}`
       if (entry.isDirectory()) {
+        if (rules.dirNames.has(entry.name)) continue
         visit(fullPath)
         continue
       }
       if (extensions.some(ext => entry.name.endsWith(ext))) {
+        if (shouldIgnoreFile(relative(repoRoot, fullPath), rules)) continue
         results.push(fullPath)
       }
     }

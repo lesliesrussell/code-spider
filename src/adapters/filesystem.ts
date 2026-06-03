@@ -27,15 +27,18 @@ interface IgnoreConfig {
   globs: string[]
 }
 
-interface IgnoreRules {
+// code-spider-c6v
+export interface IgnoreRules {
   dirNames: Set<string>
   filePatterns: RegExp[]
+  globs: string[] // raw config globs, for tools that take glob syntax (e.g. rg)
 }
 
+// code-spider-c6v
 const DEFAULT_IGNORE_DIRS = [
   '.git', 'node_modules', 'dist', 'build', '.cache', 'coverage',
   '__pycache__', '.venv', 'venv', 'vendor', 'target', '.next', 'out', '.turbo',
-  '.code-spider',
+  '.code-spider', '.beads', '.claude', '.nardo', '.omc', '.zig-cache', 'zig-out',
 ]
 
 function stripInlineComment(line: string): string {
@@ -105,14 +108,17 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`)
 }
 
-function buildIgnoreRules(root: string): IgnoreRules {
+// code-spider-c6v
+// Single source of truth for ignore rules: defaults merged with the user's
+// .code-spider/config.yaml `ignore:` section. Consumed by the indexer walk,
+// doctor repo walk, LSP workspace collection, and flow-detector ripgrep.
+export function buildIgnoreRules(root: string): IgnoreRules {
   const config = loadIgnoreConfig(root)
+  const globs = config.globs.filter(Boolean)
   const dirNames = new Set([...DEFAULT_IGNORE_DIRS, ...config.dirs])
-  const filePatterns = config.globs
-    .filter(Boolean)
-    .map(globToRegExp)
+  const filePatterns = globs.map(globToRegExp)
 
-  return { dirNames, filePatterns }
+  return { dirNames, filePatterns, globs }
 }
 
 const EXT_LANGUAGE: Record<string, string> = {
@@ -155,7 +161,8 @@ function detectLanguage(ext: string): string {
   return EXT_LANGUAGE[ext] ?? 'Other'
 }
 
-function shouldIgnoreFile(relPath: string, rules: IgnoreRules): boolean {
+// code-spider-c6v
+export function shouldIgnoreFile(relPath: string, rules: IgnoreRules): boolean {
   const name = basename(relPath)
   return rules.filePatterns.some(pattern => pattern.test(relPath) || pattern.test(name))
 }

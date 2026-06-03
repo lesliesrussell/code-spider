@@ -1,6 +1,8 @@
 import { Database } from 'bun:sqlite'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+// code-spider-c6v
+import { buildIgnoreRules } from '../adapters/filesystem'
 
 export interface Flow {
   key: string
@@ -117,12 +119,23 @@ interface RipgrepHit {
 // code-spider-9ld
 async function ripgrep(pattern: string, repoRoot: string): Promise<RipgrepHit[]> {
   try {
+    // code-spider-c6v
+    // Ignore dirs/globs come from defaults plus .code-spider/config.yaml so
+    // self-referential folders and caches never feed flow detection.
+    const rules = buildIgnoreRules(repoRoot)
+    const ignoreGlobs: string[] = []
+    for (const dir of rules.dirNames) {
+      ignoreGlobs.push('--glob', `!**/${dir}/**`)
+    }
+    for (const glob of rules.globs) {
+      ignoreGlobs.push('--glob', `!${glob}`)
+    }
     // Exclude tests/fixtures: they routinely contain example route/event/queue
     // code as string fixtures, which is not the application's architecture.
     const proc = Bun.spawn(
       [
         'rg', '--json', '-i',
-        '--glob', '!node_modules',
+        ...ignoreGlobs,
         '--glob', '!*.test.*',
         '--glob', '!*.spec.*',
         '--glob', '!**/test/**',
