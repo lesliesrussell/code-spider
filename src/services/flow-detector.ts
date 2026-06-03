@@ -33,6 +33,13 @@ interface NodeRow {
   label: string
 }
 
+// code-spider-dvb
+// Output caps: keep flows readable and queries bounded.
+const MAX_FLOW_NODES = 10
+const MAX_FLOW_EVIDENCE = 10
+const MAX_FLOWS = 20
+const EVIDENCE_SNIPPET_LEN = 120
+
 // code-spider-9ld
 // A flow is only emitted when at least one STRONG signal corroborates it.
 // Strong signals are high-precision: real API call patterns (ripgrep), a
@@ -76,14 +83,23 @@ class FlowBuilder {
       label,
       kind,
       confidence: confidenceFromStrong(this.strongSignals),
-      nodes: this.nodeKeys.slice(0, 10),
-      evidence: this.evidence.slice(0, 10),
+      // code-spider-dvb
+      nodes: this.nodeKeys.slice(0, MAX_FLOW_NODES),
+      evidence: this.evidence.slice(0, MAX_FLOW_EVIDENCE),
     }
   }
 }
 
-// code-spider-9ld
-function readPackageDeps(repoRoot: string): Set<string> {
+// code-spider-dvb
+// Parsed once per detect() run — detectors share this instead of each
+// re-reading package.json.
+interface PackageInfo {
+  deps: Set<string>
+  fields: Set<string>
+}
+
+// code-spider-dvb
+function loadPackageInfo(repoRoot: string): PackageInfo {
   try {
     const raw = readFileSync(join(repoRoot, 'package.json'), 'utf8')
     const pkg = JSON.parse(raw) as Record<string, unknown>
@@ -96,24 +112,11 @@ function readPackageDeps(repoRoot: string): Set<string> {
         }
       }
     }
-    return deps
+    return { deps, fields: new Set(Object.keys(pkg)) }
   } catch (err) {
     // code-spider-bik
-    debugLog('flow-detector', 'failed to read package.json deps', err)
-    return new Set<string>()
-  }
-}
-
-// code-spider-9ld
-function hasPackageField(repoRoot: string, field: string): boolean {
-  try {
-    const raw = readFileSync(join(repoRoot, 'package.json'), 'utf8')
-    const pkg = JSON.parse(raw) as Record<string, unknown>
-    return pkg[field] !== undefined
-  } catch (err) {
-    // code-spider-bik
-    debugLog('flow-detector', `failed to read package.json field ${field}`, err)
-    return false
+    debugLog('flow-detector', 'failed to read package.json', err)
+    return { deps: new Set(), fields: new Set() }
   }
 }
 
@@ -142,12 +145,8 @@ async function ripgrep(pattern: string, repoRoot: string): Promise<RipgrepHit[]>
       [
         'rg', '--json', '-i',
         ...ignoreGlobs,
-        '--glob', '!*.test.*',
-        '--glob', '!*.spec.*',
-        '--glob', '!**/test/**',
-        '--glob', '!**/tests/**',
-        '--glob', '!**/__tests__/**',
-        '--glob', '!**/fixtures/**',
+        // code-spider-dvb
+        ...testExclusionGlobs(),
         pattern, repoRoot,
       ],
       { stdout: 'pipe', stderr: 'pipe' }
@@ -184,19 +183,38 @@ function intersects(deps: Set<string>, candidates: string[]): boolean {
   return candidates.some(name => deps.has(name))
 }
 
+// code-spider-dvb
+// Single source for test/fixture exclusion — both the SQL LIKE clauses and
+// the rg globs derive from these so the two filters cannot drift apart.
+const TEST_FILE_MARKERS = ['.test.', '.spec.']
+const TEST_DIR_NAMES = ['test', 'tests', '__tests__', 'fixtures']
+
+// code-spider-dvb
+function testExclusionGlobs(): string[] {
+  const globs: string[] = []
+  for (const marker of TEST_FILE_MARKERS) {
+    globs.push('--glob', `!*${marker}*`)
+  }
+  for (const dir of TEST_DIR_NAMES) {
+    globs.push('--glob', `!**/${dir}/**`)
+  }
+  return globs
+}
+
 // code-spider-9ld
 // Excludes test, spec, and fixture paths from node/symbol queries — example
 // code in tests is not the application's real architecture.
 function nonTestPath(col = 'path'): string {
-  return `
-  AND ${col} NOT LIKE '%.test.%'
-  AND ${col} NOT LIKE '%.spec.%'
-  AND ${col} NOT LIKE 'test/%'
-  AND ${col} NOT LIKE 'tests/%'
-  AND ${col} NOT LIKE '%/test/%'
-  AND ${col} NOT LIKE '%/tests/%'
-  AND ${col} NOT LIKE '%/__tests__/%'
-  AND ${col} NOT LIKE '%/fixtures/%'`
+  // code-spider-dvb
+  const clauses: string[] = []
+  for (const marker of TEST_FILE_MARKERS) {
+    clauses.push(`AND ${col} NOT LIKE '%${marker}%'`)
+  }
+  for (const dir of TEST_DIR_NAMES) {
+    clauses.push(`AND ${col} NOT LIKE '${dir}/%'`)
+    clauses.push(`AND ${col} NOT LIKE '%/${dir}/%'`)
+  }
+  return `\n  ${clauses.join('\n  ')}`
 }
 
 const ROUTE_FRAMEWORKS = ['express', 'fastify', 'hono', 'koa', '@hapi/hapi', '@nestjs/core', 'next', '@sveltejs/kit', '@remix-run/node', 'restify', 'polka']
@@ -209,9 +227,11 @@ export class FlowDetector {
   async detect(repoRoot: string, nodeRef?: string): Promise<Flow[]> {
     const flows: Flow[] = []
 
-    const routeFlow = await this.detectRoutes(repoRoot)
-    const eventFlows = await this.detectEvents(repoRoot)
-    const cliFlow = await this.detectCli(repoRoot)
+    // code-spider-dvb
+    const pkg = loadPackageInfo(repoRoot)
+    const routeFlow = await this.detectRoutes(repoRoot, pkg)
+    const eventFlows = await this.detectEvents(repoRoot, pkg)
+    const cliFlow = await this.detectCli(repoRoot, pkg)
 
     for (const flow of [routeFlow, ...eventFlows, cliFlow]) {
       if (flow !== null) flows.push(flow)
@@ -232,7 +252,8 @@ export class FlowDetector {
       ? deduped
       : deduped.flatMap(flow => this.filterFlow(flow, scope))
 
-    return filtered.slice(0, 20)
+    // code-spider-dvb
+    return filtered.slice(0, MAX_FLOWS)
   }
 
   private resolveScope(nodeRef?: string): FlowScope | null {
@@ -297,9 +318,10 @@ export class FlowDetector {
   }
 
   // code-spider-9ld
-  private async detectRoutes(repoRoot: string): Promise<Flow | null> {
+  private async detectRoutes(repoRoot: string, pkg: PackageInfo): Promise<Flow | null> {
     const builder = new FlowBuilder()
-    const deps = readPackageDeps(repoRoot)
+    // code-spider-dvb
+    const deps = pkg.deps
 
     // STRONG: a real web framework dependency.
     if (intersects(deps, ROUTE_FRAMEWORKS)) {
@@ -312,7 +334,7 @@ export class FlowDetector {
     if (routeHits.length > 0) {
       builder.addStrongSignal()
       for (const hit of routeHits) {
-        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, EVIDENCE_SNIPPET_LEN))
         const key = this.nodeKeyForPath(repoRoot, hit.path)
         if (key) builder.addNode(key)
       }
@@ -353,9 +375,10 @@ export class FlowDetector {
   }
 
   // code-spider-9ld
-  private async detectEvents(repoRoot: string): Promise<Flow[]> {
+  private async detectEvents(repoRoot: string, pkg: PackageInfo): Promise<Flow[]> {
     const flows: Flow[] = []
-    const deps = readPackageDeps(repoRoot)
+    // code-spider-dvb
+    const deps = pkg.deps
 
     const queue = await this.detectQueueWorkers(repoRoot, deps)
     if (queue !== null) flows.push(queue)
@@ -381,7 +404,7 @@ export class FlowDetector {
     if (ctorHits.length > 0) {
       builder.addStrongSignal()
       for (const hit of ctorHits) {
-        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, EVIDENCE_SNIPPET_LEN))
         const key = this.nodeKeyForPath(repoRoot, hit.path)
         if (key) builder.addNode(key)
       }
@@ -422,7 +445,7 @@ export class FlowDetector {
     if (emitterHits.length > 0) {
       builder.addStrongSignal()
       for (const hit of emitterHits) {
-        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, EVIDENCE_SNIPPET_LEN))
         const key = this.nodeKeyForPath(repoRoot, hit.path)
         if (key) builder.addNode(key)
       }
@@ -432,7 +455,7 @@ export class FlowDetector {
   }
 
   // code-spider-9ld
-  private async detectCli(repoRoot: string): Promise<Flow | null> {
+  private async detectCli(repoRoot: string, pkg: PackageInfo): Promise<Flow | null> {
     const builder = new FlowBuilder()
 
     // STRONG: argument-parsing call sites.
@@ -443,14 +466,15 @@ export class FlowDetector {
       for (const hit of argvHits) {
         if (seen.has(hit.path)) continue
         seen.add(hit.path)
-        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, 120))
+        builder.addEvidence(`${hit.path}: ${hit.snippet}`.slice(0, EVIDENCE_SNIPPET_LEN))
         const key = this.nodeKeyForPath(repoRoot, hit.path)
         if (key) builder.addNode(key)
       }
     }
 
     // STRONG: a declared CLI binary.
-    if (hasPackageField(repoRoot, 'bin')) {
+    // code-spider-dvb
+    if (pkg.fields.has('bin')) {
       builder.addStrongSignal()
       builder.addEvidence('package.json: bin entry')
     }
