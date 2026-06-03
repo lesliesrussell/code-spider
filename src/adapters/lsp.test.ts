@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { LspAdapter, applyInferredSelectionRanges, classifySymbolSignal, normalizeDocumentSymbolResult } from './lsp'
+// code-spider-gqd
+import { JsonRpcFrameParser, LspAdapter, applyInferredSelectionRanges, classifySymbolSignal, normalizeDocumentSymbolResult } from './lsp'
 
 const tempDirs: string[] = []
 
@@ -181,6 +182,61 @@ process.stdin.on('data', chunk => {
   writeFileSync(scriptPath, script)
   return scriptPath
 }
+
+// code-spider-gqd
+describe('JsonRpcFrameParser', () => {
+  function frame(payload: object): Buffer {
+    const body = Buffer.from(JSON.stringify(payload), 'utf8')
+    return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'ascii'), body])
+  }
+
+  test('parses a complete frame', () => {
+    const parser = new JsonRpcFrameParser()
+    expect(parser.push(frame({ id: 1, result: 'ok' }))).toEqual([{ id: 1, result: 'ok' }])
+  })
+
+  test('parses multiple frames in one chunk', () => {
+    const parser = new JsonRpcFrameParser()
+    const chunk = Buffer.concat([frame({ id: 1 }), frame({ id: 2 })])
+    expect(parser.push(chunk)).toEqual([{ id: 1 }, { id: 2 }])
+  })
+
+  test('reassembles a frame split across arbitrary chunk boundaries', () => {
+    const whole = frame({ id: 1, result: { name: 'buildThing' } })
+    for (let split = 1; split < whole.length; split++) {
+      const parser = new JsonRpcFrameParser()
+      const first = parser.push(whole.subarray(0, split))
+      const second = parser.push(whole.subarray(split))
+      expect([...first, ...second]).toEqual([{ id: 1, result: { name: 'buildThing' } }])
+    }
+  })
+
+  test('handles multibyte UTF-8 bodies (Content-Length counts bytes)', () => {
+    const parser = new JsonRpcFrameParser()
+    const payload = { id: 2, result: { message: 'expected → got ✗ café 日本語' } }
+    // One frame with multibyte content followed by a plain frame — the old
+    // string-length framing desynced here and corrupted the second frame.
+    const chunk = Buffer.concat([frame(payload), frame({ id: 3, result: 'after' })])
+    expect(parser.push(chunk)).toEqual([payload, { id: 3, result: 'after' }])
+  })
+
+  test('multibyte frame split mid-character still reassembles', () => {
+    const whole = frame({ id: 4, result: '→→→' })
+    // Split inside the 3-byte arrow sequence
+    const splitAt = whole.length - 4
+    const parser = new JsonRpcFrameParser()
+    expect(parser.push(whole.subarray(0, splitAt))).toEqual([])
+    expect(parser.push(whole.subarray(splitAt))).toEqual([{ id: 4, result: '→→→' }])
+  })
+
+  test('skips headers without Content-Length and malformed JSON, keeps going', () => {
+    const parser = new JsonRpcFrameParser()
+    const garbageHeader = Buffer.from('X-Whatever: 1\r\n\r\n', 'ascii')
+    const badBody = Buffer.concat([Buffer.from('Content-Length: 5\r\n\r\n', 'ascii'), Buffer.from('{oops', 'utf8')])
+    const chunk = Buffer.concat([garbageHeader, badBody, frame({ id: 5 })])
+    expect(parser.push(chunk)).toEqual([{ id: 5 }])
+  })
+})
 
 describe('normalizeDocumentSymbolResult', () => {
   test('normalizes SymbolInformation ranges from location.range', () => {

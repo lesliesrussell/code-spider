@@ -6,6 +6,50 @@ import { buildIgnoreRules, shouldIgnoreFile } from './filesystem'
 // code-spider-bik
 import { debugLog } from '../utils/debug'
 
+// code-spider-gqd
+// Byte-correct JSON-RPC frame parser shared by every LSP session. The LSP
+// Content-Length header counts BYTES; the previous per-function string loops
+// compared it against JS string length (UTF-16 code units), so any multibyte
+// UTF-8 in server output sliced bodies short and corrupted every following
+// frame. This parser accumulates a Buffer and only decodes complete bodies.
+export class JsonRpcFrameParser {
+  private buf: Buffer = Buffer.alloc(0)
+
+  // Feed a stdout chunk; returns every complete, well-formed message it ends.
+  push(chunk: Buffer): unknown[] {
+    this.buf = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk])
+    const messages: unknown[] = []
+
+    while (true) {
+      const headerEnd = this.buf.indexOf('\r\n\r\n')
+      if (headerEnd === -1) break
+
+      const header = this.buf.subarray(0, headerEnd).toString('utf8')
+      const lenMatch = /Content-Length:\s*(\d+)/i.exec(header)
+      if (!lenMatch) {
+        debugLog('lsp', 'JSON-RPC header without Content-Length, skipping')
+        this.buf = this.buf.subarray(headerEnd + 4)
+        continue
+      }
+
+      const len = parseInt(lenMatch[1]!, 10)
+      const bodyStart = headerEnd + 4
+      if (this.buf.length < bodyStart + len) break
+
+      const body = this.buf.subarray(bodyStart, bodyStart + len).toString('utf8')
+      this.buf = this.buf.subarray(bodyStart + len)
+
+      try {
+        messages.push(JSON.parse(body))
+      } catch (err) {
+        debugLog('lsp', 'malformed JSON-RPC body', err)
+      }
+    }
+
+    return messages
+  }
+}
+
 export interface LspSymbol {
   name: string
   kind: number
@@ -230,7 +274,8 @@ async function tryRealLspDocumentSymbols(
       resolve(null)
     }, 10000)
 
-    let buf = ''
+    // code-spider-gqd
+    const parser = new JsonRpcFrameParser()
     const symbols: LspSymbol[] = []
     let initialized = false
     let docSymbolsRequested = false
@@ -255,25 +300,9 @@ async function tryRealLspDocumentSymbols(
     }
 
     proc.stdout?.on('data', (chunk: Buffer) => {
-      buf += chunk.toString()
-      while (true) {
-        const headerEnd = buf.indexOf('\r\n\r\n')
-        if (headerEnd === -1) break
-        const header = buf.slice(0, headerEnd)
-        const lenMatch = /Content-Length:\s*(\d+)/i.exec(header)
-        if (!lenMatch) { buf = buf.slice(headerEnd + 4); continue }
-        const len = parseInt(lenMatch[1]!, 10)
-        const bodyStart = headerEnd + 4
-        if (buf.length < bodyStart + len) break
-        const body = buf.slice(bodyStart, bodyStart + len)
-        buf = buf.slice(bodyStart + len)
-
-        let msg: { id?: number; result?: unknown; method?: string }
-        try { msg = JSON.parse(body) } catch (err) {
-          // code-spider-bik
-          debugLog('lsp', 'malformed JSON-RPC body', err)
-          continue
-        }
+      // code-spider-gqd
+      for (const parsed of parser.push(chunk)) {
+        const msg = parsed as { id?: number; result?: unknown; method?: string }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -346,7 +375,8 @@ async function tryRealLspReferences(
       resolve(null)
     }, 10000)
 
-    let buf = ''
+    // code-spider-gqd
+    const parser = new JsonRpcFrameParser()
     let initialized = false
     let referenceRequested = false
 
@@ -370,25 +400,9 @@ async function tryRealLspReferences(
     }
 
     proc.stdout?.on('data', (chunk: Buffer) => {
-      buf += chunk.toString()
-      while (true) {
-        const headerEnd = buf.indexOf('\r\n\r\n')
-        if (headerEnd === -1) break
-        const header = buf.slice(0, headerEnd)
-        const lenMatch = /Content-Length:\s*(\d+)/i.exec(header)
-        if (!lenMatch) { buf = buf.slice(headerEnd + 4); continue }
-        const len = parseInt(lenMatch[1]!, 10)
-        const bodyStart = headerEnd + 4
-        if (buf.length < bodyStart + len) break
-        const body = buf.slice(bodyStart, bodyStart + len)
-        buf = buf.slice(bodyStart + len)
-
-        let msg: { id?: number; result?: unknown }
-        try { msg = JSON.parse(body) } catch (err) {
-          // code-spider-bik
-          debugLog('lsp', 'malformed JSON-RPC body', err)
-          continue
-        }
+      // code-spider-gqd
+      for (const parsed of parser.push(chunk)) {
+        const msg = parsed as { id?: number; result?: unknown }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -476,7 +490,8 @@ async function tryRealLspDefinitions(
       resolve(null)
     }, 10000)
 
-    let buf = ''
+    // code-spider-gqd
+    const parser = new JsonRpcFrameParser()
     let initialized = false
     let definitionRequested = false
 
@@ -488,25 +503,9 @@ async function tryRealLspDefinitions(
     const uri = fileUri(filePath)
 
     proc.stdout?.on('data', (chunk: Buffer) => {
-      buf += chunk.toString()
-      while (true) {
-        const headerEnd = buf.indexOf('\r\n\r\n')
-        if (headerEnd === -1) break
-        const header = buf.slice(0, headerEnd)
-        const lenMatch = /Content-Length:\s*(\d+)/i.exec(header)
-        if (!lenMatch) { buf = buf.slice(headerEnd + 4); continue }
-        const len = parseInt(lenMatch[1]!, 10)
-        const bodyStart = headerEnd + 4
-        if (buf.length < bodyStart + len) break
-        const body = buf.slice(bodyStart, bodyStart + len)
-        buf = buf.slice(bodyStart + len)
-
-        let msg: { id?: number; result?: unknown }
-        try { msg = JSON.parse(body) } catch (err) {
-          // code-spider-bik
-          debugLog('lsp', 'malformed JSON-RPC body', err)
-          continue
-        }
+      // code-spider-gqd
+      for (const parsed of parser.push(chunk)) {
+        const msg = parsed as { id?: number; result?: unknown }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -591,7 +590,8 @@ async function tryRealLspDiagnostics(
     const diagnostics: LspDiagnostic[] = []
     let initialized = false
     let shutdownStarted = false
-    let buf = ''
+    // code-spider-gqd
+    const parser = new JsonRpcFrameParser()
     let idleTimer: ReturnType<typeof setTimeout> | undefined
 
     const finish = (): void => {
@@ -631,25 +631,9 @@ async function tryRealLspDiagnostics(
     const overallTimer = setTimeout(finish, 4000)
 
     proc.stdout?.on('data', (chunk: Buffer) => {
-      buf += chunk.toString()
-      while (true) {
-        const headerEnd = buf.indexOf('\r\n\r\n')
-        if (headerEnd === -1) break
-        const header = buf.slice(0, headerEnd)
-        const lenMatch = /Content-Length:\s*(\d+)/i.exec(header)
-        if (!lenMatch) { buf = buf.slice(headerEnd + 4); continue }
-        const len = parseInt(lenMatch[1]!, 10)
-        const bodyStart = headerEnd + 4
-        if (buf.length < bodyStart + len) break
-        const body = buf.slice(bodyStart, bodyStart + len)
-        buf = buf.slice(bodyStart + len)
-
-        let msg: { id?: number; result?: unknown; method?: string; params?: unknown }
-        try { msg = JSON.parse(body) } catch (err) {
-          // code-spider-bik
-          debugLog('lsp', 'malformed JSON-RPC body', err)
-          continue
-        }
+      // code-spider-gqd
+      for (const parsed of parser.push(chunk)) {
+        const msg = parsed as { id?: number; result?: unknown; method?: string; params?: unknown }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
