@@ -2,6 +2,8 @@ import type { Database } from 'bun:sqlite'
 // code-spider-8op: NodeRow import was unused
 import { Navigator } from './navigator'
 import { FlowDetector } from './flow-detector'
+// code-spider-403
+import { EmbeddingService } from './embeddings'
 
 export interface RelatedResult {
   key: string
@@ -438,6 +440,32 @@ export class RelatedService {
             recency: null,
             reasons: [`shared flow: ${flow.label}`],
             signals: ['flows'],
+          })
+        }
+      }
+    }
+
+    // code-spider-403
+    // Semantic neighbors when this run carries embeddings. Pure DB-side
+    // cosine over stored vectors — no ollama call on the query path.
+    const embeddingService = new EmbeddingService()
+    if (embeddingService.hasEmbeddings(this.db, this.runId)) {
+      for (const match of embeddingService.neighbors(this.db, this.runId, node.id, limit)) {
+        if (match.score < 0.5) continue
+        const existing = results.get(match.key)
+        if (existing) {
+          existing.score += match.score * 2
+          existing.reasons.push(`semantic similarity ${match.score.toFixed(2)}`)
+          existing.signals.push('meaning')
+        } else {
+          results.set(match.key, {
+            key: match.key,
+            label: match.label,
+            path: match.path,
+            score: match.score * 2,
+            recency: null,
+            reasons: [`semantic similarity ${match.score.toFixed(2)}`],
+            signals: ['meaning'],
           })
         }
       }

@@ -1,6 +1,8 @@
 import type { CliContext } from '../types'
 import { Indexer } from '../services/indexer'
 import { SemanticEnricher } from '../services/semantic-enricher'
+// code-spider-403
+import { EmbeddingService } from '../services/embeddings'
 import { resolve } from 'node:path'
 
 export default async function run(ctx: CliContext): Promise<void> {
@@ -17,11 +19,14 @@ export default async function run(ctx: CliContext): Promise<void> {
     dbPath,
   })
 
-  // code-spider-oun
+  // code-spider-oun code-spider-403
   const incremental = ctx.flags['incremental'] === true
-  if (incremental && !ctx.flags['semantic']) {
-    console.log('Note: --incremental affects semantic enrichment; the structural sweep is always full. Add --semantic to benefit.')
+  if (incremental && !ctx.flags['semantic'] && !ctx.flags['embed']) {
+    console.log('Note: --incremental affects semantic enrichment and embeddings; the structural sweep is always full. Add --semantic or --embed to benefit.')
   }
+
+  // code-spider-403
+  let enrichment: Awaited<ReturnType<SemanticEnricher['run']>> | undefined
 
   if (ctx.flags['semantic']) {
     // code-spider-mbc
@@ -52,9 +57,7 @@ export default async function run(ctx: CliContext): Promise<void> {
       // code-spider-oun
       incremental,
     })
-    if (ctx.json) {
-      console.log(JSON.stringify({ ...result, enrichment: enrichResult }))
-    } else {
+    if (!ctx.json) {
       // code-spider-oun
       const carriedStr = enrichResult.filesCarried > 0 ? ` (${enrichResult.filesCarried} files carried forward)` : ''
       console.log(`✓ Semantic: ${enrichResult.symbolsAdded} symbols, ${enrichResult.diagnosticsAdded} diagnostics${carriedStr}`)
@@ -63,9 +66,36 @@ export default async function run(ctx: CliContext): Promise<void> {
         console.log(`  Note: ${enrichResult.filesSkipped} files beyond the enrichment cap were skipped`)
       }
     }
-  } else if (ctx.json) {
-    console.log(JSON.stringify(result))
-  } else {
+    enrichment = enrichResult
+  } else if (!ctx.json) {
     console.log(`✓ Run #${result.runId}: ${result.fileCount} files, ${result.zoneCount} zones (${result.durationMs}ms)`)
+  }
+
+  // code-spider-403
+  // Embeddings run last so symbol names (if --semantic ran) enrich the text.
+  let embedding: Awaited<ReturnType<EmbeddingService['embedRun']>> | undefined
+  if (ctx.flags['embed']) {
+    if (!ctx.json) console.log('Embedding units...')
+    embedding = await new EmbeddingService().embedRun({
+      repoRoot: targetPath,
+      runId: result.runId,
+      dbPath,
+      incremental,
+    })
+    if (!ctx.json) {
+      const carried = embedding.filesCarried > 0 ? ` (${embedding.filesCarried} carried forward)` : ''
+      console.log(`✓ Embeddings: ${embedding.filesEmbedded} files embedded${carried}`)
+      if (embedding.filesFailed > 0) {
+        console.log(`  Warning: ${embedding.filesFailed} files failed to embed — is ollama running? See: code-spider doctor`)
+      }
+    }
+  }
+
+  if (ctx.json) {
+    console.log(JSON.stringify({
+      ...result,
+      ...(enrichment !== undefined ? { enrichment } : {}),
+      ...(embedding !== undefined ? { embedding } : {}),
+    }))
   }
 }

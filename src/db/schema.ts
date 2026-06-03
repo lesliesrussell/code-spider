@@ -130,6 +130,17 @@ export const SCHEMA: string[] = [
   note TEXT,
   PRIMARY KEY (investigation_id, evidence_id)
 )`,
+  // code-spider-403
+  // Semantic embeddings: one vector per unit node per run, model-tagged so a
+  // model swap invalidates cleanly. Vector is a Float32Array blob.
+  `CREATE TABLE IF NOT EXISTS embeddings (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES runs(id),
+  node_id INTEGER NOT NULL REFERENCES nodes(id),
+  model TEXT NOT NULL,
+  dims INTEGER NOT NULL,
+  vector BLOB NOT NULL
+)`,
   // code-spider-xbf
   // Indexes for the hot query paths. Without these every navigator, flow,
   // related, doctor-coverage, and semantic query full-scans its table.
@@ -153,4 +164,6 @@ export const SCHEMA: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_symbol_edges_to ON symbol_edges(to_symbol_id)`,
   // analyzer_runs: doctor coverage aggregates per run.
   `CREATE INDEX IF NOT EXISTS idx_analyzer_runs_run ON analyzer_runs(run_id)`,
+  // code-spider-403
+  `CREATE INDEX IF NOT EXISTS idx_embeddings_run_node ON embeddings(run_id, node_id)`,
 ]

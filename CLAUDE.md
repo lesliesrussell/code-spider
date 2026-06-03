@@ -80,13 +80,14 @@ Each analyzer declares: name, kind (structural | heuristic | semantic | quality)
 code-spider
   doctor [semantic|repo|perf]
   inspect [path]
-  index [path] [--semantic] [--incremental] [--max-files <n|all>]
+  index [path] [--semantic] [--embed] [--incremental] [--max-files <n|all>]
   overview [--run <id>]
   zones [--kind <language>] [--limit <n>]
   show <node-ref> [--semantic] [--evidence]
   children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
   related <node-ref> [--kind <signal>] [--limit <n>]
   flows [<node-ref>] [--limit <n>]
+  find "<query>" [--limit <n>]
   refs <symbol-or-node>
   defs <symbol-or-node>
   atoms <unit-ref>

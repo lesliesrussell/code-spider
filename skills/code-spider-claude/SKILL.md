@@ -54,6 +54,21 @@ Interpret the `show` sections as:
 Prefer `--json` when you intend to parse output programmatically — every
 command supports it, and field names are stabler than human headings.
 
+### 3b. Semantic search when ollama is available
+
+```bash
+code-spider index /path/to/repo --db /tmp/repo.db --embed
+code-spider find "where is retry logic handled" --repo /path/to/repo --db /tmp/repo.db
+code-spider related --repo /path/to/repo --db /tmp/repo.db unit:src/main.ts --kind meaning
+```
+
+`--embed` requires a local ollama with `nomic-embed-text` (doctor reports
+availability under the `ollama` check). `find` ranks units by meaning — no
+symbol names needed; `related --kind meaning` surfaces conceptual neighbors
+beyond shared symbols. Caveat: one vector per file — code buried mid-file in
+very long units may rank lower than expected. Re-run with `--incremental` to
+re-embed only changed files.
+
 ### 4. Add semantic depth when available
 
 ```bash

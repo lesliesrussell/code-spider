@@ -22,7 +22,8 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   // code-spider-tn8
   // --kind filters results to one relationship signal.
-  const RELATED_KINDS = ['topology', 'symbols', 'docs', 'git', 'issues', 'flows']
+  // code-spider-403: 'meaning' = embedding similarity (requires index --embed)
+  const RELATED_KINDS = ['topology', 'symbols', 'docs', 'git', 'issues', 'flows', 'meaning']
   const kindFlag = ctx.flags['kind']
   let kind: string | undefined
   if (kindFlag !== undefined) {

@@ -12,10 +12,11 @@ const USAGE = `code-spider <command> [options]
 Commands:
   doctor [semantic|repo|perf]          Check environment and analysis readiness
   inspect [path]                       Inspect a repository without writing inside it
-  index [path] [--semantic] [--incremental] [--max-files <n|all>]
+  index [path] [--semantic] [--embed] [--incremental] [--max-files <n|all>]
                                        Index a repository; --semantic adds symbol enrichment
                                        (default cap 100 files; --max-files all lifts it);
-                                       --incremental reuses semantic results for unchanged files
+                                       --embed adds nomic-embed-text vectors (needs ollama);
+                                       --incremental reuses results for unchanged files
   overview [--run <id>]                Repository overview (default: latest run)
   zones [--kind <language>] [--limit <n>]
                                        List top-level zones, optionally by dominant language
@@ -24,9 +25,10 @@ Commands:
                                        --evidence lifts the 5-row evidence cap
   children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
                                        List child nodes
-  related <node-ref> [--kind topology|symbols|docs|git|issues|flows] [--limit <n>]
+  related <node-ref> [--kind topology|symbols|docs|git|issues|flows|meaning] [--limit <n>]
                                        List related nodes, optionally by one signal
   flows [<node-ref>] [--limit <n>]     List detected flows
+  find "<query>" [--limit <n>]         Semantic search over embedded units
   refs <symbol>                        Find references
   defs <symbol>                        Find definitions
   atoms <unit-ref>                     List atoms in a unit
@@ -140,6 +142,12 @@ async function main(): Promise<void> {
     }
     case 'flows': {
       const mod = await import('./commands/flows')
+      await mod.default(ctx)
+      break
+    }
+    // code-spider-403
+    case 'find': {
+      const mod = await import('./commands/find')
       await mod.default(ctx)
       break
     }

@@ -140,7 +140,8 @@ describe('DoctorService plugin reporting', () => {
     const repoReport = await new DoctorService().run(repoRoot, dbPath, 'repo')
     expect(repoReport.scope).toBe('repo')
     for (const check of repoReport.checks) {
-      expect(['git', 'rg', 'database']).toContain(check.name)
+      // code-spider-403: ollama is environment tooling
+      expect(['git', 'rg', 'database', 'ollama']).toContain(check.name)
     }
 
     const semanticReport = await new DoctorService().run(repoRoot, dbPath, 'semantic')

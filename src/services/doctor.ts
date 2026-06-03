@@ -13,6 +13,8 @@ import { buildIgnoreRules, shouldIgnoreFile } from '../adapters/filesystem'
 import { debugLog } from '../utils/debug'
 // code-spider-ijq
 import { commandExists } from '../utils/exec'
+// code-spider-403
+import { OllamaAdapter, EMBEDDING_MODEL } from '../adapters/ollama'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
@@ -584,7 +586,8 @@ function checkMatchesScope(check: Check, scope: DoctorScope): boolean {
     return check.name.includes(':') || check.name === 'analyzer-registry'
   }
   if (scope === 'repo') {
-    return ['git', 'rg', 'database'].includes(check.name)
+    // code-spider-403: ollama included — it's environment tooling
+    return ['git', 'rg', 'database', 'ollama'].includes(check.name)
   }
   return ['repo-size', 'database'].includes(check.name)
 }
@@ -602,6 +605,24 @@ export class DoctorService {
   )
     const gitCheck = checkGit(repoRoot)
     const rgCheck = checkRg()
+    // code-spider-403
+    // Embeddings are optional — never 'fail'. warn = feature unavailable.
+    const ollama = await new OllamaAdapter().isAvailable()
+    const ollamaCheck: Check = ollama.reachable && ollama.modelPresent
+      ? { name: 'ollama', status: 'pass', message: `reachable, ${EMBEDDING_MODEL} present` }
+      : ollama.reachable
+        ? {
+            name: 'ollama',
+            status: 'warn',
+            message: `reachable but ${EMBEDDING_MODEL} not pulled — find/--embed unavailable`,
+            remedy: `ollama pull ${EMBEDDING_MODEL}`,
+          }
+        : {
+            name: 'ollama',
+            status: 'warn',
+            message: 'not reachable — find/--embed unavailable (structural features unaffected)',
+            remedy: 'Start ollama, or set CODE_SPIDER_OLLAMA_URL',
+          }
     // code-spider-d12
     const registryCheck: Check = registryLoad.error === undefined
       ? { name: 'analyzer-registry', status: 'pass', message: `${registry.languages.length} languages configured` }
@@ -627,6 +648,8 @@ export class DoctorService {
     const checks: Check[] = [
       gitCheck,
       rgCheck,
+      // code-spider-403
+      ollamaCheck,
       dbCheck,
       // code-spider-d12
       registryCheck,
