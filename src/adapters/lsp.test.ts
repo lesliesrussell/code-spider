@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-// code-spider-gqd
-import { JsonRpcFrameParser, LspAdapter, applyInferredSelectionRanges, classifySymbolSignal, normalizeDocumentSymbolResult } from './lsp'
+// code-spider-gqd code-spider-e3d
+import { JsonRpcFrameParser, LspAdapter, applyInferredSelectionRanges, classifySymbolSignal, liveLspProcessCount, normalizeDocumentSymbolResult, trackProc } from './lsp'
 
 const tempDirs: string[] = []
 
@@ -182,6 +182,21 @@ process.stdin.on('data', chunk => {
   writeFileSync(scriptPath, script)
   return scriptPath
 }
+
+// code-spider-e3d
+describe('LSP child-process registry', () => {
+  test('tracks live processes and removes them on close', async () => {
+    const { spawn } = await import('node:child_process')
+    const before = liveLspProcessCount()
+    const proc = spawn('sleep', ['10'])
+    trackProc(proc)
+    expect(liveLspProcessCount()).toBe(before + 1)
+
+    proc.kill()
+    await new Promise<void>(resolve => proc.on('close', () => resolve()))
+    expect(liveLspProcessCount()).toBe(before)
+  })
+})
 
 // code-spider-gqd
 describe('JsonRpcFrameParser', () => {

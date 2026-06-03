@@ -246,6 +246,39 @@ export function applyInferredSelectionRanges(symbols: LspSymbol[], sourceText?: 
   })
 }
 
+// code-spider-e3d
+// Registry of live LSP child processes. Each session kills its own child on
+// completion/timeout/error, but nothing covered the parent dying — Ctrl-C
+// mid-enrichment orphaned every in-flight language server. A single set of
+// exit hooks reaps survivors.
+const liveProcs = new Set<ReturnType<typeof spawn>>()
+let exitHooksInstalled = false
+
+function reapLiveProcs(): void {
+  for (const proc of liveProcs) {
+    try { proc.kill() } catch { /* ignore */ }
+  }
+  liveProcs.clear()
+}
+
+// code-spider-e3d
+export function trackProc(proc: ReturnType<typeof spawn>): void {
+  liveProcs.add(proc)
+  proc.on('close', () => { liveProcs.delete(proc) })
+
+  if (!exitHooksInstalled) {
+    exitHooksInstalled = true
+    process.on('exit', reapLiveProcs)
+    process.on('SIGINT', () => { reapLiveProcs(); process.exit(130) })
+    process.on('SIGTERM', () => { reapLiveProcs(); process.exit(143) })
+  }
+}
+
+// code-spider-e3d (exposed for tests)
+export function liveLspProcessCount(): number {
+  return liveProcs.size
+}
+
 // Attempt real LSP communication via stdio JSON-RPC
 async function tryRealLspDocumentSymbols(
   filePath: string,
@@ -260,6 +293,8 @@ async function tryRealLspDocumentSymbols(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      // code-spider-e3d
+      trackProc(proc)
     } catch (err) {
       // code-spider-bik
       debugLog('lsp', `failed to spawn ${bin}`, err)
@@ -361,6 +396,8 @@ async function tryRealLspReferences(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      // code-spider-e3d
+      trackProc(proc)
     } catch (err) {
       // code-spider-bik
       debugLog('lsp', `failed to spawn ${bin}`, err)
@@ -476,6 +513,8 @@ async function tryRealLspDefinitions(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      // code-spider-e3d
+      trackProc(proc)
     } catch (err) {
       // code-spider-bik
       debugLog('lsp', `failed to spawn ${bin}`, err)
@@ -580,6 +619,8 @@ async function tryRealLspDiagnostics(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      // code-spider-e3d
+      trackProc(proc)
     } catch (err) {
       // code-spider-bik
       debugLog('lsp', `failed to spawn ${bin}`, err)
