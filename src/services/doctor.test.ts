@@ -100,6 +100,27 @@ describe('DoctorService plugin reporting', () => {
     expect(report.fidelity.flowHeuristics).toBe(false)
   })
 
+  // code-spider-jew
+  test('classifies a corrupted database and suggests a reindex', async () => {
+    const repoRoot = makeTempRepo('code-spider-doctor-corrupt')
+    writeFileSync(join(repoRoot, 'README.md'), '# fixture\n')
+    mkdirSync(join(repoRoot, '.code-spider'), { recursive: true })
+    // Garbage bytes — sqlite rejects this as 'file is not a database'
+    writeFileSync(join(repoRoot, '.code-spider', 'index.db'), 'this is not a sqlite file')
+
+    const report = await new DoctorService().run(
+      repoRoot,
+      join(repoRoot, '.code-spider', 'index.db')
+    )
+
+    const dbCheck = report.checks.find(check => check.name === 'database')
+    expect(dbCheck?.status).toBe('fail')
+    expect(dbCheck?.message).toContain('corrupted')
+    expect(dbCheck?.remedy).toContain('code-spider index')
+    expect(report.fidelity.structural).toBe(false)
+    expect(report.fidelity.flowHeuristics).toBe(false)
+  })
+
   test('prefers last-run analyzer coverage over static availability when a run exists', async () => {
     const repoRoot = makeTempRepo('code-spider-doctor-coverage')
     mkdirSync(join(repoRoot, 'src'), { recursive: true })

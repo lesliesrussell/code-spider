@@ -316,14 +316,44 @@ function checkDatabase(dbPath: string): { check: Check; db: Database | null; las
   } catch (err) {
     // code-spider-bik
     debugLog('doctor', 'failed to read database', err)
+    // code-spider-jew
+    const detail = err instanceof Error ? err.message : String(err)
+    if (isCorruptionError(detail)) {
+      return {
+        check: {
+          name: 'database',
+          status: 'fail',
+          message: `database is corrupted (${detail})`,
+          remedy: 'Delete .code-spider/index.db* and re-run: code-spider index',
+        },
+        db,
+        lastRunId: null,
+        lastRunDate: null,
+        fileCount: null,
+      }
+    }
     return {
-      check: { name: 'database', status: 'warn', message: 'database exists but could not be read' },
+      check: {
+        name: 'database',
+        status: 'warn',
+        message: `database exists but could not be read (${detail})`,
+      },
       db,
       lastRunId: null,
       lastRunDate: null,
       fileCount: null,
     }
   }
+}
+
+// code-spider-jew
+// SQLite corruption signatures — a corrupted index is not recoverable by
+// retrying; the only remedy is a reindex.
+function isCorruptionError(message: string): boolean {
+  const lowered = message.toLowerCase()
+  return ['malformed', 'not a database', 'invalid rootpage', 'database disk image'].some(
+    signature => lowered.includes(signature)
+  )
 }
 
 function checkRepoSize(_repoRoot: string, db: Database | null, lastRunId: number | null): Check {
