@@ -469,3 +469,18 @@ export function loadAnalyzerRegistrySafeFromPath(path: string): AnalyzerRegistry
 export function loadDefaultAnalyzerRegistrySafe(): AnalyzerRegistryLoadResult {
   return loadAnalyzerRegistrySafeFromPath(resolve(import.meta.dir, '..', 'config', 'analyzers.yaml'))
 }
+
+// code-spider-ofm
+// Extension → display-name map derived from the registry, so a language added
+// only in config/analyzers.yaml is recognized during the filesystem walk
+// (otherwise its files index as 'Other' and semantic enrichment never sees
+// them). Merged over the built-in extension map by the indexer.
+export function registryExtensionLanguages(registry: AnalyzerRegistryDocument): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const language of registry.languages) {
+    for (const ext of language.detect.extensions ?? []) {
+      map[ext] = language.display_name
+    }
+  }
+  return map
+}

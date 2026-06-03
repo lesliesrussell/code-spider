@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { AnalyzerRegistryError, loadAnalyzerRegistrySafeFromPath, loadDefaultAnalyzerRegistry, parseAnalyzerRegistry } from './analyzer-registry-loader'
+import { AnalyzerRegistryError, loadAnalyzerRegistrySafeFromPath, loadDefaultAnalyzerRegistry, parseAnalyzerRegistry, registryExtensionLanguages } from './analyzer-registry-loader'
 
 // code-spider-d12
 describe('loadAnalyzerRegistrySafeFromPath', () => {
@@ -30,6 +30,40 @@ describe('loadAnalyzerRegistrySafeFromPath', () => {
     const result = loadAnalyzerRegistrySafeFromPath(join(import.meta.dir, '..', 'config', 'analyzers.yaml'))
     expect(result.error).toBeUndefined()
     expect(result.registry.languages.length).toBeGreaterThan(0)
+  })
+})
+
+// code-spider-ofm
+describe('registryExtensionLanguages', () => {
+  test('maps every declared extension to the language display name', () => {
+    const registry = parseAnalyzerRegistry(`
+version: 1
+languages:
+  - id: lisp
+    display_name: Lisp
+    detect:
+      extensions:
+        - .lisp
+        - .lsp
+    analyzers:
+      - id: lisp-lsp
+        kind: lsp
+        tool: lisp-language-server
+        command:
+          - lisp-language-server
+          - --stdio
+        capabilities:
+          - symbols
+        priority: 100
+`)
+    expect(registryExtensionLanguages(registry)).toEqual({ '.lisp': 'Lisp', '.lsp': 'Lisp' })
+  })
+
+  test('covers the shipped registry languages', () => {
+    const registry = loadAnalyzerRegistrySafeFromPath(join(import.meta.dir, '..', 'config', 'analyzers.yaml')).registry
+    const map = registryExtensionLanguages(registry)
+    expect(map['.ts']).toBe('TypeScript')
+    expect(map['.zig']).toBe('Zig')
   })
 })
 

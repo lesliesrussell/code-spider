@@ -89,6 +89,20 @@ describe('FilesystemAdapter.walk with config ignores', () => {
   })
 })
 
+// code-spider-ofm
+describe('FilesystemAdapter.walk language overrides', () => {
+  test('registry-declared extensions map to their language; builtin map still applies', async () => {
+    mkdirSync(join(root, 'src'))
+    writeFileSync(join(root, 'src', 'core.lisp'), '(define x 1)')
+    writeFileSync(join(root, 'src', 'app.ts'), 'export {}')
+
+    const files = await new FilesystemAdapter().walk(root, { '.lisp': 'Lisp' })
+    const byPath = new Map(files.map(f => [f.relPath, f.language]))
+    expect(byPath.get('src/core.lisp')).toBe('Lisp')
+    expect(byPath.get('src/app.ts')).toBe('TypeScript')
+  })
+})
+
 describe('collectWorkspaceFiles with config ignores', () => {
   test('excludes config-ignored dirs and globs', () => {
     writeConfig([

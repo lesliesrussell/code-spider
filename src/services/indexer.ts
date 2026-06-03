@@ -5,6 +5,8 @@ import { FilesystemAdapter } from '../adapters/filesystem'
 import { GitAdapter, type GitCommitRecord } from '../adapters/git'
 import { LineCountAdapter } from '../adapters/line-count'
 import { BeadsContextIndexer } from './beads-context'
+// code-spider-ofm
+import { loadDefaultAnalyzerRegistrySafe, registryExtensionLanguages } from '../analyzer-registry-loader'
 import { MarkdownContextIndexer } from './markdown-context'
 
 export interface IndexOptions {
@@ -123,8 +125,14 @@ export class Indexer {
     const gitAdapter = new GitAdapter(repoRoot)
     const beadsAdapter = new BeadsAdapter(repoRoot)
 
+    // code-spider-ofm
+    // Languages declared only in config/analyzers.yaml (e.g. a new Lisp) get
+    // recognized at walk time, so their units carry the right language and
+    // semantic enrichment picks them up — no bespoke plugin code required.
+    const registryLanguages = registryExtensionLanguages(loadDefaultAnalyzerRegistrySafe().registry)
+
     const [files, headCommit, gitHistory, beadsIssues] = await Promise.all([
-      fsAdapter.walk(repoRoot),
+      fsAdapter.walk(repoRoot, registryLanguages),
       gitAdapter.getHeadCommit(),
       gitAdapter.getRecentHistory(),
       beadsAdapter.listIssues(),

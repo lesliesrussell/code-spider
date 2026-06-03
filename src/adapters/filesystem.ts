@@ -161,8 +161,9 @@ const EXT_LANGUAGE: Record<string, string> = {
   '.sql': 'SQL',
 }
 
-function detectLanguage(ext: string): string {
-  return EXT_LANGUAGE[ext] ?? 'Other'
+// code-spider-ofm
+function detectLanguage(ext: string, overrides?: Record<string, string>): string {
+  return overrides?.[ext] ?? EXT_LANGUAGE[ext] ?? 'Other'
 }
 
 // code-spider-c6v
@@ -171,7 +172,8 @@ export function shouldIgnoreFile(relPath: string, rules: IgnoreRules): boolean {
   return rules.filePatterns.some(pattern => pattern.test(relPath) || pattern.test(name))
 }
 
-function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreRules): void {
+// code-spider-ofm: languageOverrides lets registry-declared languages win
+function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreRules, languageOverrides?: Record<string, string>): void {
   let entries: import('node:fs').Dirent<string>[]
   try {
     entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
@@ -187,7 +189,7 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
     const fullPath = join(dir, entry.name)
 
     if (entry.isDirectory()) {
-      walkDir(fullPath, root, results, rules)
+      walkDir(fullPath, root, results, rules, languageOverrides)
     } else if (entry.isFile()) {
       let size = 0
       try {
@@ -204,7 +206,8 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
         path: fullPath,
         relPath,
         ext,
-        language: detectLanguage(ext),
+        // code-spider-ofm
+        language: detectLanguage(ext, languageOverrides),
         sizeBytes: size,
       })
     }
@@ -212,10 +215,11 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
 }
 
 export class FilesystemAdapter {
-  async walk(root: string): Promise<FileEntry[]> {
+  // code-spider-ofm
+  async walk(root: string, languageOverrides?: Record<string, string>): Promise<FileEntry[]> {
     const results: FileEntry[] = []
     const rules = buildIgnoreRules(root)
-    walkDir(root, root, results, rules)
+    walkDir(root, root, results, rules, languageOverrides)
     return results
   }
 

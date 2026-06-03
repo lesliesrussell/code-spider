@@ -134,7 +134,39 @@ Key commands during development:
 - ripgrep (required for fast structural search)
 - Git (for history and co-change analysis)
 
-Extending to new languages (Lisp, Python, Rust, etc.) is done by adding plugins that implement the `LanguagePlugin` interface and registering analyzer capabilities.
+### Adding a language
+
+Most languages need **no code** — declare them in `config/analyzers.yaml` and
+the registry-driven plugin handles the rest (file detection, LSP sessions,
+doctor reporting, semantic enrichment):
+
+```yaml
+  - id: lisp
+    display_name: Lisp
+    detect:
+      extensions:
+        - .lisp
+        - .lsp
+    analyzers:
+      - id: lisp-lsp
+        kind: lsp
+        tool: lisp-language-server
+        command:
+          - lisp-language-server
+          - --stdio
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+```
+
+Files with the declared extensions are recognized at index time, units carry
+the language, and `index --semantic` drives the configured LSP command.
+Write a bespoke `LanguagePlugin` implementation only when a language needs
+custom heuristics beyond what the registry can express (see
+`src/plugins/typescript-javascript-plugin.ts` for the pattern).
 
 ## Why code-spider?
 
