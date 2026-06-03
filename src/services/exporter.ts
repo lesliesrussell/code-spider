@@ -305,6 +305,20 @@ export class Exporter {
       lines.push('')
     }
 
+    // code-spider-azy
+    if (detail.pinnedEvidence.length > 0) {
+      lines.push('## Pinned Evidence')
+      for (const pin of detail.pinnedEvidence) {
+        const locator = pin.locator ? ` (${pin.locator})` : ''
+        const snippet = pin.snippet ? ` — ${pin.snippet}` : ''
+        lines.push(`- [${pin.kind}] ${pin.source}${locator}${snippet}`)
+        if (pin.note) {
+          lines.push(`  > ${pin.note}`)
+        }
+      }
+      lines.push('')
+    }
+
     if (detail.nodes.length > 0) {
       lines.push('## Nodes Visited')
       for (const n of detail.nodes) {

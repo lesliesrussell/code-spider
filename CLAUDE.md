@@ -90,7 +90,7 @@ code-spider
   refs <symbol-or-node>
   defs <symbol-or-node>
   atoms <unit-ref>
-  investigate [start|add|note|show]
+  investigate [start|add|pin|note|show]
   export report <node-ref|investigation-id> [--format md|json]
 ```
 

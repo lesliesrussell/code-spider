@@ -7,6 +7,16 @@ import {
   type NodeStats,
 } from './navigator'
 
+// code-spider-azy
+export interface PinnedEvidenceRow {
+  evidenceId: number
+  kind: string
+  source: string
+  locator: string | null
+  snippet: string | null
+  note: string | null
+}
+
 export interface InvestigationDetail {
   id: number
   runId: number | null
@@ -15,6 +25,8 @@ export interface InvestigationDetail {
   summary: string | null
   createdAt: string
   nodes: { key: string; label: string; kind: string; note: string | null }[]
+  // code-spider-azy
+  pinnedEvidence: PinnedEvidenceRow[]
 }
 
 export interface InvestigationNodeDetail {
@@ -38,6 +50,8 @@ export interface InvestigationDetailWithContext {
   summary: string | null
   createdAt: string
   nodes: InvestigationNodeDetail[]
+  // code-spider-azy
+  pinnedEvidence: PinnedEvidenceRow[]
 }
 
 export interface InvestigationSummary {
@@ -132,6 +146,45 @@ export class InvestigationService {
     ).run(now, investigationId)
   }
 
+  // code-spider-azy
+  // Pin a specific evidence row (ids shown by `show` / --json) to the thread.
+  pinEvidence(investigationId: number, evidenceId: number, note?: string): void {
+    this.getInvestigationRow(investigationId)
+
+    const evidence = this.db.query<{ id: number }, [number]>(
+      `SELECT id FROM evidence WHERE id=? LIMIT 1`
+    ).get(evidenceId)
+    if (!evidence) {
+      throw new Error(`Evidence not found: #${evidenceId}`)
+    }
+
+    this.db.prepare(
+      `INSERT OR IGNORE INTO investigation_evidence (investigation_id, evidence_id, note) VALUES (?, ?, ?)`
+    ).run(investigationId, evidenceId, note ?? null)
+
+    if (note !== undefined) {
+      this.db.prepare(
+        `UPDATE investigation_evidence SET note=? WHERE investigation_id=? AND evidence_id=?`
+      ).run(note, investigationId, evidenceId)
+    }
+
+    const now = new Date().toISOString()
+    this.db.prepare(
+      `UPDATE investigations SET updated_at=? WHERE id=?`
+    ).run(now, investigationId)
+  }
+
+  // code-spider-azy
+  private getPinnedEvidence(investigationId: number): PinnedEvidenceRow[] {
+    return this.db.query<PinnedEvidenceRow, [number]>(
+      `SELECT e.id as evidenceId, e.kind, e.source, e.locator, e.snippet, inv_e.note
+       FROM investigation_evidence inv_e
+       JOIN evidence e ON e.id = inv_e.evidence_id
+       WHERE inv_e.investigation_id=?
+       ORDER BY e.id ASC`
+    ).all(investigationId)
+  }
+
   addNote(investigationId: number, note: string): void {
     const existing = this.db.query<{ summary: string | null }, [number]>(
       `SELECT summary FROM investigations WHERE id=? LIMIT 1`
@@ -160,6 +213,8 @@ export class InvestigationService {
       summary: inv.summary,
       createdAt: inv.created_at,
       nodes,
+      // code-spider-azy
+      pinnedEvidence: this.getPinnedEvidence(investigationId),
     }
   }
 

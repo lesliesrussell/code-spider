@@ -74,6 +74,17 @@ export default async function run(ctx: CliContext): Promise<void> {
       console.log(`  ${detail.summary}`)
       console.log()
     }
+    // code-spider-azy
+    if (detail.pinnedEvidence.length > 0) {
+      console.log(`Pinned Evidence (${detail.pinnedEvidence.length})`)
+      for (const pin of detail.pinnedEvidence) {
+        const locator = pin.locator ? ` (${pin.locator})` : ''
+        const snippet = pin.snippet ? ` — ${pin.snippet}` : ''
+        const noteStr = pin.note ? `  » ${pin.note}` : ''
+        console.log(`  #${pin.evidenceId} [${pin.kind}] ${pin.source}${locator}${snippet}${noteStr}`)
+      }
+      console.log()
+    }
     if (detail.nodes.length > 0) {
       console.log(`Nodes (${detail.nodes.length})`)
       for (const n of detail.nodes) {
@@ -134,6 +145,36 @@ export default async function run(ctx: CliContext): Promise<void> {
     return
   }
 
+  // code-spider-azy
+  if (subcommand === 'pin') {
+    const idStr = ctx.args[1]
+    const evidenceIdStr = ctx.args[2]
+    if (!idStr || !evidenceIdStr) {
+      console.error('Usage: code-spider investigate pin <inv-id> <evidence-id> [note]')
+      console.error('Evidence ids appear in `show <node-ref>` output (and its --json).')
+      process.exit(1)
+    }
+    const id = parseInt(idStr, 10)
+    const evidenceId = parseInt(evidenceIdStr, 10)
+    if (!Number.isInteger(evidenceId)) {
+      console.error(`Invalid evidence id: ${evidenceIdStr}`)
+      process.exit(1)
+    }
+    const note = ctx.args.slice(3).join(' ')
+    try {
+      svc.pinEvidence(id, evidenceId, note === '' ? undefined : note)
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
+    if (ctx.json) {
+      console.log(JSON.stringify({ ok: true, investigationId: id, evidenceId }))
+    } else {
+      console.log(`Pinned evidence #${evidenceId} to investigation #${id}`)
+    }
+    return
+  }
+
   if (subcommand === 'note') {
     const idStr = ctx.args[1]
     const text = ctx.args.slice(2).join(' ')
@@ -157,6 +198,6 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   console.error(`Unknown subcommand: ${subcommand}`)
-  console.error('Available: start, add, note, show, (none = list)')
+  console.error('Available: start, add, pin, note, show, (none = list)')
   process.exit(1)
 }

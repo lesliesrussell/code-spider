@@ -32,6 +32,8 @@ Commands:
   investigate                          List investigations
   investigate start "<question>"       Start an investigation
   investigate add <inv-id> <node-ref>  Add a node to an investigation
+  investigate pin <inv-id> <evidence-id> [note]
+                                       Pin an evidence row (ids in show output)
   investigate note <inv-id> <text>     Add a note to an investigation
   investigate show <inv-id>            Show an investigation
   export report <node-ref|inv-id> [--format md|json]

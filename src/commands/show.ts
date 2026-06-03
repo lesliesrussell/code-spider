@@ -123,7 +123,8 @@ export default async function run(ctx: CliContext): Promise<void> {
     for (const e of evidence) {
       const locStr = e.locator ? `  ${e.locator}` : ''
       const snipStr = e.snippet ? `  → ${e.snippet}` : ''
-      console.log(`  ${e.kind.padEnd(10)}  ${e.source}${locStr}${snipStr}`)
+      // code-spider-azy: id shown so rows can be pinned via `investigate pin`
+      console.log(`  #${String(e.id).padEnd(5)} ${e.kind.padEnd(10)}  ${e.source}${locStr}${snipStr}`)
     }
     console.log()
   }

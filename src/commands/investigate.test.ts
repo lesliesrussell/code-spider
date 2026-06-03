@@ -36,6 +36,50 @@ function captureLogs(): { lines: string[]; restore: () => void } {
 }
 
 describe('investigate command', () => {
+  // code-spider-azy
+  test('pin attaches evidence to the thread and show/export surface it', async () => {
+    const repoRoot = makeTempRepo('code-spider-investigate-pin')
+    mkdirSync(join(repoRoot, '.code-spider'), { recursive: true })
+    const dbPath = join(repoRoot, '.code-spider', 'index.db')
+    const db = openDb(dbPath)
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-04-22T10:00:00Z', '2026-04-22T10:02:00Z', repoRoot, 'abc1234', 'test')
+    db.query(
+      `INSERT INTO investigations (id, run_id, title, question, status, summary, created_at, updated_at)
+       VALUES (7, 1, 'Pin test', 'Where is the evidence?', 'open', NULL, '2026-04-22T10:03:00Z', '2026-04-22T10:03:00Z')`
+    ).run()
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES (1, 1, 'unit', 'unit:main.ts', 'main.ts', 'main.ts', 'TypeScript', 0.8, 1)`
+    ).run()
+    db.query(
+      `INSERT INTO evidence (id, run_id, node_id, kind, source, locator, snippet, score)
+       VALUES (42, 1, 1, 'git', 'abc1234', 'main.ts', 'introduce runner', 1.0)`
+    ).run()
+
+    const ctx = (args: string[]): CliContext => ({
+      args, repoRoot, dbPath, json: false, flags: {},
+    })
+
+    const pinCapture = captureLogs()
+    try {
+      await runInvestigate(ctx(['pin', '7', '42', 'key commit']))
+    } finally {
+      pinCapture.restore()
+    }
+    expect(pinCapture.lines.some(line => line.includes('Pinned evidence #42'))).toBe(true)
+
+    const showCapture = captureLogs()
+    try {
+      await runInvestigate(ctx(['show', '7']))
+    } finally {
+      showCapture.restore()
+    }
+    expect(showCapture.lines.some(line => line.includes('Pinned Evidence (1)'))).toBe(true)
+    expect(showCapture.lines.some(line => line.includes('#42') && line.includes('introduce runner') && line.includes('key commit'))).toBe(true)
+  })
+
   test('shows curated context for visited nodes', async () => {
     const repoRoot = makeTempRepo('code-spider-investigate-show')
     mkdirSync(join(repoRoot, '.code-spider'), { recursive: true })

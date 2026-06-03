@@ -24,6 +24,8 @@ export interface RiskSignals {
 }
 
 export interface EvidenceRow {
+  // code-spider-azy: exposed so evidence can be pinned to investigations
+  id: number
   kind: string
   source: string
   locator: string | null
@@ -100,7 +102,7 @@ export class Navigator {
 
   getEvidence(nodeId: number, limit = 5): EvidenceRow[] {
     return this.db.query<EvidenceRow, [number, number, number]>(
-      'SELECT kind, source, locator, snippet, score FROM evidence WHERE run_id=? AND node_id=? ORDER BY score DESC LIMIT ?'
+      'SELECT id, kind, source, locator, snippet, score FROM evidence WHERE run_id=? AND node_id=? ORDER BY score DESC LIMIT ?'
     ).all(this.runId, nodeId, limit)
   }
 
@@ -123,7 +125,7 @@ export class Navigator {
 
   getGitContext(nodeId: number, limit = 3): EvidenceRow[] {
     return this.db.query<EvidenceRow, [number, number, number]>(
-      `SELECT kind, source, locator, snippet, score
+      `SELECT id, kind, source, locator, snippet, score
        FROM evidence
        WHERE run_id=? AND node_id=? AND kind='git'
        ORDER BY score DESC, id DESC
