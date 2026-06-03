@@ -143,7 +143,9 @@ export class Indexer {
     // 5. Detect zones and insert zone nodes
     const zones = fsAdapter.detectZones(files, repoRoot)
     for (const zone of zones) {
-      insertNode.run(runId, 'zone', `zone:${zone.name}`, zone.name, zone.name, null)
+      // code-spider-eed
+      // Persist the dominant language so `zones --kind` can filter on it.
+      insertNode.run(runId, 'zone', `zone:${zone.name}`, zone.name, zone.name, zone.languages[0] ?? null)
     }
 
     // 6. Derive curated git context from recent history

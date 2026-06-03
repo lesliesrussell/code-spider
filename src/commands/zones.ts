@@ -21,7 +21,15 @@ export default async function run(ctx: CliContext): Promise<void> {
   const nav = new Navigator(db, runId)
   const limitFlag = ctx.flags['limit']
   const limit = typeof limitFlag === 'string' ? parseInt(limitFlag, 10) : 20
-  const zones = nav.getZones(limit)
+
+  // code-spider-eed
+  // --kind filters zones by their dominant language (persisted at index time).
+  const kindFlag = ctx.flags['kind']
+  const kind = typeof kindFlag === 'string' ? kindFlag.toLowerCase() : undefined
+  const allZones = nav.getZones(limit)
+  const zones = kind === undefined
+    ? allZones
+    : allZones.filter(z => (z.language ?? '').toLowerCase() === kind)
   const repoNode = nav.getRepoNode()
   const repoName = repoNode?.label ?? ctx.repoRoot.split('/').pop() ?? '.'
 
@@ -30,7 +38,8 @@ export default async function run(ctx: CliContext): Promise<void> {
       const zoneName = z.key.slice('zone:'.length)
       const stats = nav.getStats(z.id)
       const fileCount = nav.getZoneFileCount(zoneName)
-      return { key: z.key, label: z.label, score: z.score, fileCount, loc: stats.loc }
+      // code-spider-eed
+      return { key: z.key, label: z.label, language: z.language, score: z.score, fileCount, loc: stats.loc }
     })
     console.log(JSON.stringify(result, null, 2))
     return
@@ -49,7 +58,9 @@ export default async function run(ctx: CliContext): Promise<void> {
     const stats = nav.getStats(z.id)
     const fileCount = nav.getZoneFileCount(zoneName)
     const locStr = stats.loc > 0 ? `  ${rpad(String(stats.loc), 6)} loc` : ''
-    console.log(`  ${pad(z.label, 16)}  score: ${z.score.toFixed(2)}   ${rpad(String(fileCount), 4)} files${locStr}`)
+    // code-spider-eed
+    const langStr = z.language ? `  [${z.language}]` : ''
+    console.log(`  ${pad(z.label, 16)}  score: ${z.score.toFixed(2)}   ${rpad(String(fileCount), 4)} files${locStr}${langStr}`)
   }
   console.log()
 }

@@ -16,7 +16,8 @@ Commands:
                                        Index a repository; --semantic adds symbol enrichment
                                        (default cap 100 files; --max-files all lifts it)
   overview                             Repository overview
-  zones [--limit <n>]                  List top-level zones
+  zones [--kind <language>] [--limit <n>]
+                                       List top-level zones, optionally by dominant language
   show <node-ref> [--semantic] [--evidence]
                                        Show node details; --semantic adds atoms,
                                        --evidence lifts the 5-row evidence cap
