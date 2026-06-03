@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import { Navigator, type NodeRow } from './navigator'
+// code-spider-8op: NodeRow import was unused
+import { Navigator } from './navigator'
 import { FlowDetector } from './flow-detector'
 
 export interface RelatedResult {

@@ -20,7 +20,8 @@ function makeTempDir(name: string): string {
   return dir
 }
 
-function writeFakeServer(mode: 'symbols' | 'refs' | 'definitions' | 'diagnostics' | 'workspace-refs', outputPath: string): string {
+// code-spider-8op: outputPath was never used by the generated script
+function writeFakeServer(mode: 'symbols' | 'refs' | 'definitions' | 'diagnostics' | 'workspace-refs', _outputPath: string): string {
   const scriptPath = join(makeTempDir(`code-spider-lsp-${mode}`), 'server.js')
   const script = `
 const fs = require('node:fs')

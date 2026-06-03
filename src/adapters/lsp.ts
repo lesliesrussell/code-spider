@@ -423,9 +423,12 @@ async function tryRealLspReferences(
     }
 
     const uri = fileUri(filePath)
-    let text = ''
+    // code-spider-8op
+    // Readability check only — references send workspace file contents via
+    // workspaceFiles, so the result is unused, but an unreadable target
+    // should still fail fast and clean up the spawned server.
     try {
-      text = readFileSync(filePath, 'utf8')
+      readFileSync(filePath, 'utf8')
     } catch (err) {
       // code-spider-bik
       // Clean up the spawned server and pending timer on this early exit.
