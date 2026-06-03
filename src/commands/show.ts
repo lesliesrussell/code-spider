@@ -1,6 +1,8 @@
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
+// code-spider-u97
+import { SemanticQueryService } from '../services/semantic-query'
 
 function formatRecency(recency: number): string {
   if (recency > 900) return 'unknown'
@@ -30,9 +32,19 @@ export default async function run(ctx: CliContext): Promise<void> {
     process.exit(1)
   }
 
+  // code-spider-u97
+  // --evidence lifts the default 5-row evidence cap; --semantic includes the
+  // unit's symbols (same data as `atoms`).
+  const showAllEvidence = ctx.flags['evidence'] === true
+  const includeSemantic = ctx.flags['semantic'] === true
+
   const stats = nav.getStats(node.id)
   const children = nav.getChildren(nodeRef, 'score', 5)
-  const evidence = nav.getEvidence(node.id, 5)
+  const evidence = nav.getEvidence(node.id, showAllEvidence ? 100 : 5)
+  // code-spider-u97
+  const atoms = includeSemantic && node.kind === 'unit'
+    ? new SemanticQueryService(db, runId).findAtoms(nodeRef)
+    : null
   const gitContext = nav.getGitContext(node.id, 3)
   const markdownContext = nav.getMarkdownContext(node.id, 5)
   const beadsContext = nav.getBeadsContext(node.id, 5)
@@ -50,6 +62,8 @@ export default async function run(ctx: CliContext): Promise<void> {
       gitContext,
       markdownContext,
       beadsContext,
+      // code-spider-u97
+      ...(atoms !== null ? { atoms } : {}),
     }, null, 2))
     return
   }
@@ -86,6 +100,20 @@ export default async function run(ctx: CliContext): Promise<void> {
       const when = item.locator ? `  ${item.locator}` : ''
       const message = item.snippet ? `  → ${item.snippet}` : ''
       console.log(`  ${item.source}${when}${message}`)
+    }
+    console.log()
+  }
+
+  // code-spider-u97
+  if (atoms !== null) {
+    console.log(`Atoms (${atoms.length})`)
+    for (const atom of atoms.slice(0, 30)) {
+      const line = atom.anchorLine !== null ? atom.anchorLine + 1 : '?'
+      const container = atom.containerName ? `  in ${atom.containerName}` : ''
+      console.log(`  ${String(line).padStart(4)}  ${atom.kind.padEnd(12)}  ${atom.name}${container}`)
+    }
+    if (atoms.length > 30) {
+      console.log(`  … ${atoms.length - 30} more — use: code-spider atoms ${nodeRef}`)
     }
     console.log()
   }

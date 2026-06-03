@@ -17,7 +17,9 @@ Commands:
                                        (default cap 100 files; --max-files all lifts it)
   overview                             Repository overview
   zones [--limit <n>]                  List top-level zones
-  show <node-ref>                      Show node details with evidence
+  show <node-ref> [--semantic] [--evidence]
+                                       Show node details; --semantic adds atoms,
+                                       --evidence lifts the 5-row evidence cap
   children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
                                        List child nodes
   related <node-ref> [--limit <n>]     List related nodes
