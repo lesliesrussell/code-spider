@@ -130,4 +130,27 @@ export const SCHEMA: string[] = [
   note TEXT,
   PRIMARY KEY (investigation_id, evidence_id)
 )`,
+  // code-spider-xbf
+  // Indexes for the hot query paths. Without these every navigator, flow,
+  // related, doctor-coverage, and semantic query full-scans its table.
+  // nodes: looked up by (run_id, kind) with path filters, by key, by path.
+  `CREATE INDEX IF NOT EXISTS idx_nodes_run_kind ON nodes(run_id, kind)`,
+  `CREATE INDEX IF NOT EXISTS idx_nodes_run_path ON nodes(run_id, path)`,
+  `CREATE INDEX IF NOT EXISTS idx_nodes_run_key ON nodes(run_id, key)`,
+  // edges: traversed by kind within a run and joined from either endpoint.
+  `CREATE INDEX IF NOT EXISTS idx_edges_run_kind ON edges(run_id, kind)`,
+  `CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_node_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_node_id)`,
+  // evidence/stats/diagnostics: fetched per node within a run.
+  `CREATE INDEX IF NOT EXISTS idx_evidence_run_node ON evidence(run_id, node_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_stats_run_node ON stats(run_id, node_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_stats_run_metric ON stats(run_id, metric)`,
+  `CREATE INDEX IF NOT EXISTS idx_diagnostics_run_node ON diagnostics(run_id, node_id)`,
+  // symbols: joined by node and searched by name (refs/defs/related overlap).
+  `CREATE INDEX IF NOT EXISTS idx_symbols_run_name ON symbols(run_id, name)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbols_node ON symbols(node_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbol_edges_from ON symbol_edges(from_symbol_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbol_edges_to ON symbol_edges(to_symbol_id)`,
+  // analyzer_runs: doctor coverage aggregates per run.
+  `CREATE INDEX IF NOT EXISTS idx_analyzer_runs_run ON analyzer_runs(run_id)`,
 ]

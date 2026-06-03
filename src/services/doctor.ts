@@ -397,8 +397,10 @@ function checkRepoSize(_repoRoot: string, db: Database | null, lastRunId: number
         name: 'repo-size',
         status: 'warn',
         message: `${count} files indexed — large repo, analysis may be slow`,
-        // code-spider-ok8
-        remedy: 'Use code-spider index --incremental for re-scans, and ignore generated dirs via .code-spider/config.yaml',
+        // code-spider-xbf
+        // No --incremental flag exists yet (tracked: code-spider-oun); only
+        // recommend what the tool can actually do today.
+        remedy: 'Ignore caches and generated dirs via .code-spider/config.yaml ignore: section to shrink the index',
       }
     }
     return { name: 'repo-size', status: 'pass', message: `${count} files indexed` }
