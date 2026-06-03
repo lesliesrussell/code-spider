@@ -183,6 +183,50 @@ process.stdin.on('data', chunk => {
   return scriptPath
 }
 
+// code-spider-e9i
+describe('LSP session against a misbehaving server (e2e)', () => {
+  const fakeServer = join(import.meta.dir, 'fixtures', 'fake-lsp-server.ts')
+
+  function makeTargetFile(): { repoRoot: string; filePath: string } {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'code-spider-fake-lsp-'))
+    const filePath = join(repoRoot, 'sample.ts')
+    writeFileSync(filePath, 'export function sample() {}\n')
+    return { repoRoot, filePath }
+  }
+
+  test('happy mode parses symbols end-to-end (positive control)', async () => {
+    const { repoRoot, filePath } = makeTargetFile()
+    try {
+      const result = await new LspAdapter().getSymbols(filePath, 'typescript', repoRoot, ['bun', fakeServer, 'happy'])
+      expect(result.error).toBeUndefined()
+      expect(result.symbols.map(s => s.name)).toEqual(['fakeSymbol'])
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true })
+    }
+  })
+
+  for (const mode of ['malformed-json', 'garbage', 'truncated', 'silent']) {
+    test(`${mode} server degrades to no-symbols without hanging or leaking`, async () => {
+      const { repoRoot, filePath } = makeTargetFile()
+      const procsBefore = liveLspProcessCount()
+      const started = Date.now()
+      try {
+        const result = await new LspAdapter().getSymbols(filePath, 'typescript', repoRoot, ['bun', fakeServer, mode])
+        expect(result.symbols).toEqual([])
+        expect(result.error).toBe('no-symbols')
+        // The server exits on its own in every mode — well under the 10s timeout.
+        expect(Date.now() - started).toBeLessThan(8000)
+        // Give close events a beat to deregister, then assert no leaks.
+        // (<= because a previous test's proc may deregister during this one.)
+        await new Promise(resolve => setTimeout(resolve, 200))
+        expect(liveLspProcessCount()).toBeLessThanOrEqual(procsBefore)
+      } finally {
+        rmSync(repoRoot, { recursive: true, force: true })
+      }
+    })
+  }
+})
+
 // code-spider-e3d
 describe('LSP child-process registry', () => {
   test('tracks live processes and removes them on close', async () => {
