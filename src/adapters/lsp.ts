@@ -279,15 +279,48 @@ export function liveLspProcessCount(): number {
   return liveProcs.size
 }
 
-// Attempt real LSP communication via stdio JSON-RPC
-async function tryRealLspDocumentSymbols(
-  filePath: string,
-  command: string[],
-  languageId: string,
-  repoRoot: string,
-): Promise<LspSymbol[] | null> {
+// code-spider-zex
+// One LSP stdio session: spawn → initialize handshake → capability-specific
+// requests → cleanup. The four capability functions used to hand-roll this
+// (~100 lines each, four near-copies); they are now thin configurations of
+// this runner. Per-server/per-capability tuning (timeouts, idle-finish for
+// notification-driven flows, whether the target file must be readable) lives
+// in the options — that is the quirk surface for differing server behavior.
+interface LspSessionContext<T> {
+  send: (msg: object) => void
+  finish: (result: T) => void
+  scheduleIdleFinish: () => void
+  targetText: string
+}
+
+interface LspSessionOptions<T> {
+  command: string[]
+  filePath: string
+  repoRoot: string
+  capabilities: object
+  // Overall deadline. Default 10s → resolve null. Sessions that can return
+  // partial results on deadline (diagnostics) provide onTimeout.
+  timeoutMs?: number
+  onTimeout?: () => T
+  // Debounced completion for notification-driven flows: each
+  // scheduleIdleFinish() call re-arms the timer; when it fires the session
+  // finishes with idleResult().
+  idleFinishMs?: number
+  idleResult?: () => T
+  // Fail fast (with cleanup) when the target file is unreadable. Sessions
+  // that send target content via other means may skip the read.
+  readTargetFile?: boolean
+  onInitialized: (ctx: LspSessionContext<T>) => void
+  onMessage: (
+    msg: { id?: number; result?: unknown; method?: string; params?: unknown },
+    ctx: LspSessionContext<T>,
+  ) => void
+  onClose?: (initialized: boolean) => T | null
+}
+
+function runLspSession<T>(opts: LspSessionOptions<T>): Promise<T | null> {
   return new Promise((resolve) => {
-    const [bin, ...args] = command
+    const [bin, ...args] = opts.command
     if (bin === undefined) { resolve(null); return }
 
     let proc: ReturnType<typeof spawn>
@@ -302,82 +335,154 @@ async function tryRealLspDocumentSymbols(
       return
     }
 
-    const timer = setTimeout(() => {
-      // code-spider-bik
-      debugLog('lsp', `request timed out after 10s: ${filePath}`)
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(null)
-    }, 10000)
-
-    // code-spider-gqd
-    const parser = new JsonRpcFrameParser()
-    const symbols: LspSymbol[] = []
+    const timeoutMs = opts.timeoutMs ?? 10000
+    let completed = false
     let initialized = false
-    let docSymbolsRequested = false
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
+
+    const clearTimers = (): void => {
+      clearTimeout(overallTimer)
+      if (idleTimer !== undefined) clearTimeout(idleTimer)
+    }
+
+    // Single exit path: clears timers, optionally says goodbye politely,
+    // always kills, resolves exactly once.
+    const complete = (result: T | null, shutdown: boolean): void => {
+      if (completed) return
+      completed = true
+      clearTimers()
+      if (shutdown) {
+        send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
+        send({ jsonrpc: '2.0', method: 'exit', params: null })
+      }
+      try { proc.kill() } catch { /* ignore */ }
+      resolve(result)
+    }
+
+    const overallTimer = setTimeout(() => {
+      if (opts.onTimeout !== undefined) {
+        complete(opts.onTimeout(), true)
+      } else {
+        // code-spider-bik
+        debugLog('lsp', `request timed out after ${timeoutMs}ms: ${opts.filePath}`)
+        complete(null, false)
+      }
+    }, timeoutMs)
 
     const send = (msg: object): void => {
       const body = JSON.stringify(msg)
       proc.stdin?.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
     }
 
-    const uri = fileUri(filePath)
-    let text = ''
-    try {
-      text = readFileSync(filePath, 'utf8')
-    } catch (err) {
-      // code-spider-bik
-      // Clean up the spawned server and pending timer on this early exit.
-      debugLog('lsp', `failed to read ${filePath}`, err)
-      clearTimeout(timer)
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(null)
-      return
+    let targetText = ''
+    if (opts.readTargetFile !== false) {
+      try {
+        targetText = readFileSync(opts.filePath, 'utf8')
+      } catch (err) {
+        // code-spider-bik
+        // Clean up the spawned server and pending timers on this early exit.
+        debugLog('lsp', `failed to read ${opts.filePath}`, err)
+        complete(null, false)
+        return
+      }
     }
 
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      // code-spider-gqd
-      for (const parsed of parser.push(chunk)) {
-        const msg = parsed as { id?: number; result?: unknown; method?: string }
+    const ctx: LspSessionContext<T> = {
+      send,
+      finish: (result: T) => complete(result, true),
+      scheduleIdleFinish: () => {
+        if (opts.idleFinishMs === undefined || opts.idleResult === undefined) return
+        if (idleTimer !== undefined) clearTimeout(idleTimer)
+        idleTimer = setTimeout(() => complete(opts.idleResult!(), true), opts.idleFinishMs)
+      },
+      targetText,
+    }
 
+    // code-spider-gqd
+    const parser = new JsonRpcFrameParser()
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      for (const parsed of parser.push(chunk)) {
+        const msg = parsed as { id?: number; result?: unknown; method?: string; params?: unknown }
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
           send({ jsonrpc: '2.0', method: 'initialized', params: {} })
-          send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
-            textDocument: { uri, languageId, version: 1, text }
-          }})
-          docSymbolsRequested = true
-          send({ jsonrpc: '2.0', id: 2, method: 'textDocument/documentSymbol', params: {
-            textDocument: { uri }
-          }})
-        } else if (docSymbolsRequested && msg.id === 2) {
-          symbols.push(...applyInferredSelectionRanges(normalizeDocumentSymbolResult(msg.result), text))
-          send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
-          send({ jsonrpc: '2.0', method: 'exit', params: null })
-          clearTimeout(timer)
-          try { proc.kill() } catch { /* ignore */ }
-          resolve(symbols)
+          opts.onInitialized(ctx)
+          continue
         }
+        opts.onMessage(msg, ctx)
       }
     })
 
     proc.on('error', (err: Error) => {
       // code-spider-bik
-      debugLog('lsp', `server process error: ${filePath}`, err)
-      clearTimeout(timer)
-      resolve(null)
+      debugLog('lsp', `server process error: ${opts.filePath}`, err)
+      complete(null, false)
     })
-    proc.on('close', () => { clearTimeout(timer); resolve(symbols.length > 0 ? symbols : null) })
+    proc.on('close', () => {
+      if (completed) return
+      completed = true
+      clearTimers()
+      resolve(opts.onClose !== undefined ? opts.onClose(initialized) : null)
+    })
 
-    // Send initialize
     send({
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: {
         processId: process.pid,
-        rootUri: fileUri(repoRoot),
-        capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+        rootUri: fileUri(opts.repoRoot),
+        capabilities: opts.capabilities,
         initializationOptions: {},
-      }
+      },
     })
+  })
+}
+
+// code-spider-zex
+// Shared didOpen for the workspace files reference/definition sessions feed.
+function sendWorkspaceDidOpens(
+  send: (msg: object) => void,
+  workspaceFiles: Array<{ path: string; text: string }>,
+  languageId: string,
+): void {
+  for (const workspaceFile of workspaceFiles) {
+    send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
+      textDocument: {
+        uri: fileUri(workspaceFile.path),
+        languageId,
+        version: 1,
+        text: workspaceFile.text,
+      },
+    }})
+  }
+}
+
+// Attempt real LSP communication via stdio JSON-RPC
+async function tryRealLspDocumentSymbols(
+  filePath: string,
+  command: string[],
+  languageId: string,
+  repoRoot: string,
+): Promise<LspSymbol[] | null> {
+  // code-spider-zex
+  const uri = fileUri(filePath)
+  return runLspSession<LspSymbol[]>({
+    command,
+    filePath,
+    repoRoot,
+    capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+    onInitialized: ({ send, targetText }) => {
+      send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
+        textDocument: { uri, languageId, version: 1, text: targetText }
+      }})
+      send({ jsonrpc: '2.0', id: 2, method: 'textDocument/documentSymbol', params: {
+        textDocument: { uri }
+      }})
+    },
+    onMessage: (msg, { finish, targetText }) => {
+      if (msg.id === 2) {
+        finish(applyInferredSelectionRanges(normalizeDocumentSymbolResult(msg.result), targetText))
+      }
+    },
   })
 }
 
@@ -389,115 +494,32 @@ async function tryRealLspReferences(
   repoRoot: string,
   workspaceFiles: Array<{ path: string; text: string }>,
 ): Promise<LspLocation[] | null> {
-  return new Promise((resolve) => {
-    const [bin, ...args] = command
-    if (bin === undefined) { resolve(null); return }
-
-    let proc: ReturnType<typeof spawn>
-    try {
-      proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-      // code-spider-e3d
-      trackProc(proc)
-    } catch (err) {
-      // code-spider-bik
-      debugLog('lsp', `failed to spawn ${bin}`, err)
-      resolve(null)
-      return
-    }
-
-    const timer = setTimeout(() => {
-      // code-spider-bik
-      debugLog('lsp', `request timed out after 10s: ${filePath}`)
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(null)
-    }, 10000)
-
-    // code-spider-gqd
-    const parser = new JsonRpcFrameParser()
-    let initialized = false
-    let referenceRequested = false
-
-    const send = (msg: object): void => {
-      const body = JSON.stringify(msg)
-      proc.stdin?.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
-    }
-
-    const uri = fileUri(filePath)
-    // code-spider-8op
-    // Readability check only — references send workspace file contents via
-    // workspaceFiles, so the result is unused, but an unreadable target
-    // should still fail fast and clean up the spawned server.
-    try {
-      readFileSync(filePath, 'utf8')
-    } catch (err) {
-      // code-spider-bik
-      // Clean up the spawned server and pending timer on this early exit.
-      debugLog('lsp', `failed to read ${filePath}`, err)
-      clearTimeout(timer)
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(null)
-      return
-    }
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      // code-spider-gqd
-      for (const parsed of parser.push(chunk)) {
-        const msg = parsed as { id?: number; result?: unknown }
-
-        if (!initialized && msg.id === 1 && msg.result !== undefined) {
-          initialized = true
-          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
-          for (const workspaceFile of workspaceFiles) {
-            send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
-              textDocument: {
-                uri: fileUri(workspaceFile.path),
-                languageId,
-                version: 1,
-                text: workspaceFile.text,
-              },
-            }})
-          }
-          referenceRequested = true
-          send({ jsonrpc: '2.0', id: 2, method: 'textDocument/references', params: {
-            textDocument: { uri },
-            position,
-            context: { includeDeclaration: true },
-          }})
-        } else if (referenceRequested && msg.id === 2) {
-          const result = Array.isArray(msg.result) ? msg.result : []
-          const locations: LspLocation[] = result.flatMap(item => {
-            const raw = item as Record<string, unknown>
-            const locationUri = typeof raw['uri'] === 'string' ? raw['uri'] : undefined
-            const range = raw['range'] as LspLocation['range'] | undefined
-            if (!locationUri || !range) return []
-            return [{ uri: locationUri, range }]
-          })
-          send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
-          send({ jsonrpc: '2.0', method: 'exit', params: null })
-          clearTimeout(timer)
-          try { proc.kill() } catch { /* ignore */ }
-          resolve(locations)
-        }
-      }
-    })
-
-    proc.on('error', (err: Error) => {
-      // code-spider-bik
-      debugLog('lsp', `server process error: ${filePath}`, err)
-      clearTimeout(timer)
-      resolve(null)
-    })
-    proc.on('close', () => { clearTimeout(timer); resolve(null) })
-
-    send({
-      jsonrpc: '2.0', id: 1, method: 'initialize',
-      params: {
-        processId: process.pid,
-        rootUri: fileUri(repoRoot),
-        capabilities: { textDocument: { references: { dynamicRegistration: false } } },
-        initializationOptions: {},
-      }
-    })
+  // code-spider-zex
+  const uri = fileUri(filePath)
+  return runLspSession<LspLocation[]>({
+    command,
+    filePath,
+    repoRoot,
+    capabilities: { textDocument: { references: { dynamicRegistration: false } } },
+    onInitialized: ({ send }) => {
+      sendWorkspaceDidOpens(send, workspaceFiles, languageId)
+      send({ jsonrpc: '2.0', id: 2, method: 'textDocument/references', params: {
+        textDocument: { uri },
+        position,
+        context: { includeDeclaration: true },
+      }})
+    },
+    onMessage: (msg, { finish }) => {
+      if (msg.id !== 2) return
+      const result = Array.isArray(msg.result) ? msg.result : []
+      finish(result.flatMap(item => {
+        const raw = item as Record<string, unknown>
+        const locationUri = typeof raw['uri'] === 'string' ? raw['uri'] : undefined
+        const range = raw['range'] as LspLocation['range'] | undefined
+        if (!locationUri || !range) return []
+        return [{ uri: locationUri, range }]
+      }))
+    },
   })
 }
 
@@ -509,103 +531,37 @@ async function tryRealLspDefinitions(
   repoRoot: string,
   workspaceFiles: Array<{ path: string; text: string }>,
 ): Promise<LspLocation[] | null> {
-  return new Promise((resolve) => {
-    const [bin, ...args] = command
-    if (bin === undefined) { resolve(null); return }
-
-    let proc: ReturnType<typeof spawn>
-    try {
-      proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-      // code-spider-e3d
-      trackProc(proc)
-    } catch (err) {
-      // code-spider-bik
-      debugLog('lsp', `failed to spawn ${bin}`, err)
-      resolve(null)
-      return
-    }
-
-    const timer = setTimeout(() => {
-      // code-spider-bik
-      debugLog('lsp', `request timed out after 10s: ${filePath}`)
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(null)
-    }, 10000)
-
-    // code-spider-gqd
-    const parser = new JsonRpcFrameParser()
-    let initialized = false
-    let definitionRequested = false
-
-    const send = (msg: object): void => {
-      const body = JSON.stringify(msg)
-      proc.stdin?.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
-    }
-
-    const uri = fileUri(filePath)
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      // code-spider-gqd
-      for (const parsed of parser.push(chunk)) {
-        const msg = parsed as { id?: number; result?: unknown }
-
-        if (!initialized && msg.id === 1 && msg.result !== undefined) {
-          initialized = true
-          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
-          for (const workspaceFile of workspaceFiles) {
-            send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
-              textDocument: {
-                uri: fileUri(workspaceFile.path),
-                languageId,
-                version: 1,
-                text: workspaceFile.text,
-              },
-            }})
-          }
-          definitionRequested = true
-          send({ jsonrpc: '2.0', id: 2, method: 'textDocument/definition', params: {
-            textDocument: { uri },
-            position,
-          }})
-        } else if (definitionRequested && msg.id === 2) {
-          const rawResult = Array.isArray(msg.result) ? msg.result : (msg.result ? [msg.result] : [])
-          const locations: LspLocation[] = rawResult.flatMap(item => {
-            const raw = item as Record<string, unknown>
-            const locationUri = typeof raw['uri'] === 'string'
-              ? raw['uri']
-              : (typeof raw['targetUri'] === 'string' ? raw['targetUri'] : undefined)
-            const range = isRange(raw['range'])
-              ? raw['range']
-              : (isRange(raw['targetSelectionRange']) ? raw['targetSelectionRange'] : undefined)
-            if (!locationUri || !range) return []
-            return [{ uri: locationUri, range }]
-          })
-          send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
-          send({ jsonrpc: '2.0', method: 'exit', params: null })
-          clearTimeout(timer)
-          try { proc.kill() } catch { /* ignore */ }
-          resolve(locations)
-        }
-      }
-    })
-
-    proc.on('error', (err: Error) => {
-      // code-spider-bik
-      debugLog('lsp', `server process error: ${filePath}`, err)
-      clearTimeout(timer)
-      resolve(null)
-    })
-    proc.on('close', () => { clearTimeout(timer); resolve(null) })
-
-    send({
-      jsonrpc: '2.0', id: 1, method: 'initialize',
-      params: {
-        processId: process.pid,
-        rootUri: fileUri(repoRoot),
-        capabilities: { textDocument: { definition: { dynamicRegistration: false } } },
-        initializationOptions: {},
-      },
-    })
+  // code-spider-zex
+  const uri = fileUri(filePath)
+  return runLspSession<LspLocation[]>({
+    command,
+    filePath,
+    repoRoot,
+    capabilities: { textDocument: { definition: { dynamicRegistration: false } } },
+    // Target content arrives via workspaceFiles; no direct read needed.
+    readTargetFile: false,
+    onInitialized: ({ send }) => {
+      sendWorkspaceDidOpens(send, workspaceFiles, languageId)
+      send({ jsonrpc: '2.0', id: 2, method: 'textDocument/definition', params: {
+        textDocument: { uri },
+        position,
+      }})
+    },
+    onMessage: (msg, { finish }) => {
+      if (msg.id !== 2) return
+      const rawResult = Array.isArray(msg.result) ? msg.result : (msg.result ? [msg.result] : [])
+      finish(rawResult.flatMap(item => {
+        const raw = item as Record<string, unknown>
+        const locationUri = typeof raw['uri'] === 'string'
+          ? raw['uri']
+          : (typeof raw['targetUri'] === 'string' ? raw['targetUri'] : undefined)
+        const range = isRange(raw['range'])
+          ? raw['range']
+          : (isRange(raw['targetSelectionRange']) ? raw['targetSelectionRange'] : undefined)
+        if (!locationUri || !range) return []
+        return [{ uri: locationUri, range }]
+      }))
+    },
   })
 }
 
@@ -615,116 +571,40 @@ async function tryRealLspDiagnostics(
   languageId: string,
   repoRoot: string,
 ): Promise<LspDiagnostic[] | null> {
-  return new Promise((resolve) => {
-    const [bin, ...args] = command
-    if (bin === undefined) { resolve(null); return }
-
-    let proc: ReturnType<typeof spawn>
-    try {
-      proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-      // code-spider-e3d
-      trackProc(proc)
-    } catch (err) {
-      // code-spider-bik
-      debugLog('lsp', `failed to spawn ${bin}`, err)
-      resolve(null)
-      return
-    }
-
-    const diagnostics: LspDiagnostic[] = []
-    let initialized = false
-    let shutdownStarted = false
-    // code-spider-gqd
-    const parser = new JsonRpcFrameParser()
-    let idleTimer: ReturnType<typeof setTimeout> | undefined
-
-    const finish = (): void => {
-      if (shutdownStarted) return
-      shutdownStarted = true
-      if (idleTimer !== undefined) clearTimeout(idleTimer)
-      send({ jsonrpc: '2.0', id: 3, method: 'shutdown', params: null })
-      send({ jsonrpc: '2.0', method: 'exit', params: null })
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(diagnostics)
-    }
-
-    const send = (msg: object): void => {
-      const body = JSON.stringify(msg)
-      proc.stdin?.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
-    }
-
-    const uri = fileUri(filePath)
-    let text = ''
-    try {
-      text = readFileSync(filePath, 'utf8')
-    } catch (err) {
-      // code-spider-bik
-      // proc is already running and no timer exists yet — kill it here or the
-      // LSP server outlives the request as a zombie.
-      debugLog('lsp', `failed to read ${filePath}`, err)
-      try { proc.kill() } catch { /* ignore */ }
-      resolve(null)
-      return
-    }
-
-    const scheduleFinish = (): void => {
-      if (idleTimer !== undefined) clearTimeout(idleTimer)
-      idleTimer = setTimeout(finish, 350)
-    }
-
-    const overallTimer = setTimeout(finish, 4000)
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      // code-spider-gqd
-      for (const parsed of parser.push(chunk)) {
-        const msg = parsed as { id?: number; result?: unknown; method?: string; params?: unknown }
-
-        if (!initialized && msg.id === 1 && msg.result !== undefined) {
-          initialized = true
-          send({ jsonrpc: '2.0', method: 'initialized', params: {} })
-          send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
-            textDocument: { uri, languageId, version: 1, text }
-          }})
-          scheduleFinish()
-          continue
-        }
-
-        if (msg.method === 'textDocument/publishDiagnostics') {
-          const params = msg.params as {
-            uri?: string
-            diagnostics?: LspDiagnostic[]
-          } | undefined
-          if (params?.uri === uri && Array.isArray(params.diagnostics)) {
-            diagnostics.length = 0
-            diagnostics.push(...params.diagnostics)
-            scheduleFinish()
-          }
-        }
+  // code-spider-zex
+  // Diagnostics are notification-driven: open the document, then collect
+  // publishDiagnostics until the server goes quiet (idle finish) or the
+  // overall deadline lands — partial results still count.
+  const uri = fileUri(filePath)
+  const diagnostics: LspDiagnostic[] = []
+  return runLspSession<LspDiagnostic[]>({
+    command,
+    filePath,
+    repoRoot,
+    capabilities: { textDocument: { publishDiagnostics: {} } },
+    timeoutMs: 4000,
+    onTimeout: () => diagnostics,
+    idleFinishMs: 350,
+    idleResult: () => diagnostics,
+    onInitialized: ({ send, targetText, scheduleIdleFinish }) => {
+      send({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
+        textDocument: { uri, languageId, version: 1, text: targetText }
+      }})
+      scheduleIdleFinish()
+    },
+    onMessage: (msg, { scheduleIdleFinish }) => {
+      if (msg.method !== 'textDocument/publishDiagnostics') return
+      const params = msg.params as {
+        uri?: string
+        diagnostics?: LspDiagnostic[]
+      } | undefined
+      if (params?.uri === uri && Array.isArray(params.diagnostics)) {
+        diagnostics.length = 0
+        diagnostics.push(...params.diagnostics)
+        scheduleIdleFinish()
       }
-    })
-
-    proc.on('error', (err: Error) => {
-      // code-spider-bik
-      debugLog('lsp', `diagnostics server process error: ${filePath}`, err)
-      clearTimeout(overallTimer)
-      if (idleTimer !== undefined) clearTimeout(idleTimer)
-      resolve(null)
-    })
-    proc.on('close', () => {
-      clearTimeout(overallTimer)
-      if (idleTimer !== undefined) clearTimeout(idleTimer)
-      resolve(initialized ? diagnostics : null)
-    })
-
-    send({
-      jsonrpc: '2.0', id: 1, method: 'initialize',
-      params: {
-        processId: process.pid,
-        rootUri: fileUri(repoRoot),
-        capabilities: { textDocument: { publishDiagnostics: {} } },
-        initializationOptions: {},
-      }
-    })
+    },
+    onClose: (initialized) => (initialized ? diagnostics : null),
   })
 }
 
