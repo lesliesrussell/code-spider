@@ -3,27 +3,37 @@
 import { resolve } from 'node:path'
 import type { CliContext } from './types'
 
+// code-spider-vo4
+// USAGE documents exactly the flags each command parses today — nothing
+// aspirational. PRD-planned flags (e.g. index --incremental) stay out until
+// they exist.
 const USAGE = `code-spider <command> [options]
 
 Commands:
   doctor [semantic|repo|perf]          Check environment and analysis readiness
   inspect [path]                       Inspect a repository without writing inside it
-  index [path]                         Index a repository
+  index [path] [--semantic]            Index a repository; --semantic adds symbol enrichment
   overview                             Repository overview
-  zones [--kind <kind>]                List top-level zones
-  show <node-ref>                      Show node details
-  children <node-ref>                  List child nodes
-  related <node-ref>                   List related nodes
-  flows [<node-ref>]                   List flows
+  zones [--limit <n>]                  List top-level zones
+  show <node-ref>                      Show node details with evidence
+  children <node-ref> [--limit <n>] [--sort score|churn|loc|recent]
+                                       List child nodes
+  related <node-ref> [--limit <n>]     List related nodes
+  flows [<node-ref>] [--limit <n>]     List detected flows
   refs <symbol>                        Find references
   defs <symbol>                        Find definitions
   atoms <unit-ref>                     List atoms in a unit
-  investigate <start|add|note|show>    Manage investigations
-  export report <ref>                  Export a report
+  investigate                          List investigations
+  investigate start "<question>"       Start an investigation
+  investigate add <inv-id> <node-ref>  Add a node to an investigation
+  investigate note <inv-id> <text>     Add a note to an investigation
+  investigate show <inv-id>            Show an investigation
+  export report <node-ref|inv-id> [--format md|json]
+                                       Export a report
 
-Options:
+Options (all commands):
   --repo <path>    Target repository (default: cwd)
-  --db <path>      Override database path
+  --db <path>      Override database path (default: <repo>/.code-spider/index.db)
   --json           Machine-readable JSON output`
 
 function parseArgs(argv: string[]): CliContext {
