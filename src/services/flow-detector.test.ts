@@ -48,7 +48,8 @@ function makeRepo(name: string, files: SeedFile[], symbols: SeedSymbol[]): { rep
      VALUES (?,1,'unit',?,?,?,'TypeScript',0.5,1)`
   )
   for (const path of unitPaths) {
-    insertNode.run(nodeId, `unit:${path}`, path.split('/').pop(), path)
+    // code-spider-w8a
+    insertNode.run(nodeId, `unit:${path}`, path.split('/').pop() ?? path, path)
     nodeIdByPath.set(path, nodeId)
     nodeId++
   }

@@ -22,14 +22,18 @@ export interface PluginRange {
 
 export type PluginSymbolSignal = 'low'
 
+// code-spider-w8a
+// Mirrors the shape plugins actually return at runtime (LspSymbol from the
+// LSP adapter and the heuristic extractor): numeric LSP SymbolKind id plus a
+// resolved kindName. The previous kind: string / kindId?: number fields were
+// never constructed anywhere and made every plugin getSymbols a type error.
 export interface PluginSymbol {
   name: string
-  kind: string
-  kindId?: number
+  kind: number
+  kindName: string
   containerName?: string
   range: PluginRange
   selectionRange?: PluginRange
-  signature?: string
   signal?: PluginSymbolSignal
   provenance?: 'semantic' | 'heuristic'
 }

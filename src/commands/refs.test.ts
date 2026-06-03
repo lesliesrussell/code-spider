@@ -98,7 +98,8 @@ describe('refs command', () => {
         mode: string
         degraded: boolean
         degradationReason?: string
-        references: Array<{ path: string }>
+        // code-spider-w8a
+        references: Array<Record<string, unknown>>
       }
 
       expect(payload.mode).toBe('indexed-symbols')

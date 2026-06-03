@@ -99,7 +99,8 @@ describe('defs command', () => {
         mode: string
         degraded: boolean
         degradationReason?: string
-        matches: Array<{ path: string }>
+        // code-spider-w8a
+        matches: Array<Record<string, unknown>>
       }
 
       expect(payload.mode).toBe('indexed-symbols')

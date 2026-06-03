@@ -74,6 +74,8 @@ describe('Exporter freshness metadata', () => {
         runId: number
         indexTimestamp: string
         semanticTimestamp: string | null
+        // code-spider-w8a
+        repoCommit: string | null
         dirtyWorktree: boolean | null
       }
       provenance: {

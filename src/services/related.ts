@@ -204,7 +204,10 @@ export class RelatedService {
     const results = new Map<string, RelatedResult>()
     const zoneName = zoneFromPath(node.path)
 
-    const overlaps = this.db.query<SymbolOverlapRow, [number, number, number]>(
+    // code-spider-w8a
+    // Bindings are dynamic: runId, nodeId, one string per low-signal symbol
+    // placeholder, then the limit.
+    const overlaps = this.db.query<SymbolOverlapRow, Array<number | string>>(
       `SELECT
          other.id AS node_id,
          other.key,

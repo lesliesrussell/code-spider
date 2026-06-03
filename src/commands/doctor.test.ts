@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import runDoctor from './doctor'
 import { DoctorService } from '../services/doctor'
+// code-spider-w8a
+import type { DoctorReport } from '../services/doctor'
 
 describe('doctor command', () => {
   const originalRun = DoctorService.prototype.run
@@ -20,7 +22,8 @@ describe('doctor command', () => {
     }
     console.error = () => {}
 
-    DoctorService.prototype.run = async () => ({
+    // code-spider-w8a
+    DoctorService.prototype.run = async (): Promise<DoctorReport> => ({
       repoRoot: '/tmp/repo',
       // code-spider-wa3
       scope: null,
@@ -87,6 +90,8 @@ describe('doctor command', () => {
       repoRoot: '/tmp/repo',
       dbPath: '/tmp/repo/.code-spider/index.db',
       json: false,
+      // code-spider-w8a
+      flags: {},
     })
 
     expect(lines).toContain('Last run sweep coverage')

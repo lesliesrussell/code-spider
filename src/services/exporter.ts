@@ -144,7 +144,8 @@ export class Exporter {
   }
 
   private getPhaseBoundarySummary(nodeId: number): PhaseBoundarySummary | null {
-    const rows = this.db.query<{ name: string | null; path: string | null }, [number, number]>(
+    // code-spider-w8a
+    const rows = this.db.query<{ name: string | null; path: string | null }, [number, number, number, number]>(
       `SELECT s.name as name, n.path as path
        FROM symbols s
        JOIN nodes n ON n.id = s.node_id
