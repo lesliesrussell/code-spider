@@ -94,6 +94,10 @@ describe('DoctorService plugin reporting', () => {
     expect(report.fidelity.symbolNavigation).toBe('fail')
     expect(report.fidelity.semanticRefs).toBe('fail')
     expect(report.fidelity.diagnostics).toBe('fail')
+    // code-spider-83v: rg may be installed, but flows are impossible without
+    // a structural index — fidelity must not claim them.
+    expect(report.fidelity.structural).toBe(false)
+    expect(report.fidelity.flowHeuristics).toBe(false)
   })
 
   test('prefers last-run analyzer coverage over static availability when a run exists', async () => {

@@ -530,11 +530,17 @@ export class DoctorService {
     const dbExists = existsSync(dbPath)
     const availableCapabilities = registryChecks.capabilities
 
+    // code-spider-83v
+    const structural = dbExists && lastRunId !== null
+
     // code-spider-h25
     const fidelity: FidelityReport = {
-      structural: dbExists && lastRunId !== null,
+      structural,
       hotspot: gitCheck.status === 'pass',
-      flowHeuristics: rgCheck.status === 'pass',
+      // code-spider-83v
+      // Flow detection needs both rg (pattern scanning) and a structural
+      // index (nodes/symbols queries) — rg alone cannot produce flows.
+      flowHeuristics: rgCheck.status === 'pass' && structural,
       symbolNavigation: semanticFidelity(lastRunCoverage, ['symbols', 'defs'], availableCapabilities),
       semanticRefs: semanticFidelity(lastRunCoverage, ['refs'], availableCapabilities),
       diagnostics: semanticFidelity(lastRunCoverage, ['diagnostics'], availableCapabilities),
