@@ -10,6 +10,11 @@ export interface EnrichOptions {
   dbPath: string
   languages?: string[]
   maxFiles?: number
+  // code-spider-oun
+  // Carry forward symbols/diagnostics from the previous completed run for
+  // files whose stat fingerprint (size + mtime) is unchanged; only changed
+  // files pay for an analyzer session.
+  incremental?: boolean
 }
 
 export interface EnrichResult {
@@ -18,6 +23,8 @@ export interface EnrichResult {
   // Files beyond maxFiles that were NOT enriched — surfaced so the cap is
   // never silent.
   filesSkipped: number
+  // code-spider-oun: files whose results were carried from the previous run
+  filesCarried: number
   symbolsAdded: number
   diagnosticsAdded: number
   analyzersRecorded: number
@@ -45,9 +52,28 @@ export class SemanticEnricher {
 
     // 2. Query unit nodes for the run
     const langPlaceholders = langFilter.map(() => '?').join(',')
-    const unitNodes = db.query<{ id: number; path: string; language: string }, string[]>(
-      `SELECT id, path, language FROM nodes WHERE run_id=? AND kind='unit' AND language IN (${langPlaceholders})`
+    // code-spider-oun: metadata_json carries the stat fingerprint
+    const unitNodes = db.query<{ id: number; path: string; language: string; metadata_json: string | null }, string[]>(
+      `SELECT id, path, language, metadata_json FROM nodes WHERE run_id=? AND kind='unit' AND language IN (${langPlaceholders})`
     ).all(String(runId), ...langFilter)
+
+    // code-spider-oun
+    // Previous run's units keyed by path, for unchanged-file carry-forward.
+    const previousUnits = new Map<string, { id: number; metadata_json: string | null }>()
+    if (opts.incremental === true) {
+      const prevRun = db.query<{ id: number }, [string, number]>(
+        `SELECT id FROM runs WHERE repo_root=? AND completed_at IS NOT NULL AND id<? ORDER BY id DESC LIMIT 1`
+      ).get(repoRoot, runId)
+      if (prevRun !== null && prevRun !== undefined) {
+        for (const row of db.query<{ id: number; path: string; metadata_json: string | null }, [number]>(
+          `SELECT id, path, metadata_json FROM nodes WHERE run_id=? AND kind='unit'`
+        ).all(prevRun.id)) {
+          previousUnits.set(row.path, { id: row.id, metadata_json: row.metadata_json })
+        }
+      } else {
+        debugLog('semantic-enricher', 'incremental requested but no previous completed run — full enrichment')
+      }
+    }
 
     // Cap at maxFiles
     const filesToProcess = unitNodes.slice(0, maxFiles)
@@ -81,10 +107,41 @@ export class SemanticEnricher {
     let symbolsAdded = 0
     let diagnosticsAdded = 0
     let errors = 0
+    // code-spider-oun
+    let filesCarried = 0
+    const copySymbols = db.prepare(
+      `INSERT INTO symbols (run_id, node_id, symbol_key, name, kind, container_name, signature, type_info, range_json, selection_range_json, metadata_json)
+       SELECT ?, ?, symbol_key, name, kind, container_name, signature, type_info, range_json, selection_range_json, metadata_json
+       FROM symbols WHERE run_id != ? AND node_id = ?`
+    )
+    const copyDiagnostics = db.prepare(
+      `INSERT INTO diagnostics (run_id, node_id, symbol_id, analyzer_id, severity, code, message, range_json, metadata_json)
+       SELECT ?, ?, NULL, analyzer_id, severity, code, message, range_json, metadata_json
+       FROM diagnostics WHERE run_id != ? AND node_id = ?`
+    )
 
     for (const node of filesToProcess) {
       if (node.path === null || node.language === null) continue
       const fullPath = join(repoRoot, node.path)
+
+      // code-spider-oun
+      // Unchanged since the previous run? Carry its results instead of paying
+      // for an analyzer session. Fingerprint mismatch or absence falls
+      // through to full analysis — stale data can never be carried.
+      const previous = previousUnits.get(node.path)
+      if (
+        previous !== undefined &&
+        node.metadata_json !== null &&
+        previous.metadata_json !== null &&
+        node.metadata_json === previous.metadata_json
+      ) {
+        const symbolCopy = copySymbols.run(runId, node.id, runId, previous.id)
+        const diagnosticCopy = copyDiagnostics.run(runId, node.id, runId, previous.id)
+        symbolsAdded += Number(symbolCopy.changes)
+        diagnosticsAdded += Number(diagnosticCopy.changes)
+        filesCarried++
+        continue
+      }
 
       try {
         const symbolResult = await this.runner.executeSymbols({
@@ -172,7 +229,10 @@ export class SemanticEnricher {
       }
     }
 
-    // code-spider-5rz
-    return { filesProcessed: filesToProcess.length, filesSkipped, symbolsAdded, diagnosticsAdded, analyzersRecorded, errors }
+    // code-spider-5rz code-spider-oun
+    if (filesCarried > 0) {
+      debugLog('semantic-enricher', `carried forward ${filesCarried} unchanged files from the previous run`)
+    }
+    return { filesProcessed: filesToProcess.length, filesSkipped, filesCarried, symbolsAdded, diagnosticsAdded, analyzersRecorded, errors }
   }
 }

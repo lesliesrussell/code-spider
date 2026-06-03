@@ -9,6 +9,8 @@ export interface FileEntry {
   ext: string       // e.g. '.ts'
   language: string  // e.g. 'TypeScript'
   sizeBytes: number
+  // code-spider-oun: change detection for incremental semantic enrichment
+  mtimeMs: number
 }
 
 export interface Zone {
@@ -206,8 +208,12 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
       walkDir(fullPath, root, results, rules, languageOverrides)
     } else if (entry.isFile()) {
       let size = 0
+      // code-spider-oun
+      let mtimeMs = 0
       try {
-        size = statSync(fullPath).size
+        const stat = statSync(fullPath)
+        size = stat.size
+        mtimeMs = stat.mtimeMs
       } catch (err) {
         // code-spider-bik
         debugLog('fs', `failed to stat ${fullPath}`, err)
@@ -223,6 +229,8 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
         // code-spider-ofm
         language: detectLanguage(ext, languageOverrides),
         sizeBytes: size,
+        // code-spider-oun
+        mtimeMs,
       })
     }
   }

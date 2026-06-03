@@ -12,9 +12,10 @@ const USAGE = `code-spider <command> [options]
 Commands:
   doctor [semantic|repo|perf]          Check environment and analysis readiness
   inspect [path]                       Inspect a repository without writing inside it
-  index [path] [--semantic] [--max-files <n|all>]
+  index [path] [--semantic] [--incremental] [--max-files <n|all>]
                                        Index a repository; --semantic adds symbol enrichment
-                                       (default cap 100 files; --max-files all lifts it)
+                                       (default cap 100 files; --max-files all lifts it);
+                                       --incremental reuses semantic results for unchanged files
   overview [--run <id>]                Repository overview (default: latest run)
   zones [--kind <language>] [--limit <n>]
                                        List top-level zones, optionally by dominant language

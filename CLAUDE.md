@@ -80,7 +80,7 @@ Each analyzer declares: name, kind (structural | heuristic | semantic | quality)
 code-spider
   doctor [semantic|repo|perf]
   inspect [path]
-  index [path] [--semantic]
+  index [path] [--semantic] [--incremental] [--max-files <n|all>]
   overview [--run <id>]
   zones [--kind <language>] [--limit <n>]
   show <node-ref> [--semantic] [--evidence]
@@ -95,9 +95,6 @@ code-spider
 ```
 
 Every command supports `--json` (machine-readable output), `--repo <path>`, and `--db <path>`.
-
-Planned per PRD but **not yet implemented** (do not document as working):
-`index --incremental` (code-spider-oun).
 
 ## Key Design Constraints
 

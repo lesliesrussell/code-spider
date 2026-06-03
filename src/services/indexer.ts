@@ -142,18 +142,19 @@ export class Indexer {
     db.prepare('UPDATE runs SET repo_commit=? WHERE id=?').run(headCommit, runId)
 
     // 4. Insert repo-level node
+    // code-spider-oun
     const insertNode = db.prepare(
-      `INSERT OR IGNORE INTO nodes (run_id, kind, key, label, path, language)
-       VALUES (?,?,?,?,?,?)`
+      `INSERT OR IGNORE INTO nodes (run_id, kind, key, label, path, language, metadata_json)
+       VALUES (?,?,?,?,?,?,?)`
     )
-    insertNode.run(runId, 'repo', 'repo:.', basename(repoRoot), null, null)
+    insertNode.run(runId, 'repo', 'repo:.', basename(repoRoot), null, null, null)
 
     // 5. Detect zones and insert zone nodes
     const zones = fsAdapter.detectZones(files, repoRoot)
     for (const zone of zones) {
       // code-spider-eed
       // Persist the dominant language so `zones --kind` can filter on it.
-      insertNode.run(runId, 'zone', `zone:${zone.name}`, zone.name, zone.name, zone.languages[0] ?? null)
+      insertNode.run(runId, 'zone', `zone:${zone.name}`, zone.name, zone.name, zone.languages[0] ?? null, null)
     }
 
     // 6. Derive curated git context from recent history
@@ -214,7 +215,10 @@ export class Indexer {
         `unit:${file.relPath}`,
         basename(file.relPath),
         file.relPath,
-        file.language
+        file.language,
+        // code-spider-oun
+        // Stat fingerprint for incremental enrichment change detection.
+        JSON.stringify({ sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs }),
       )
 
       const nodeRow = getNodeId.get(runId, 'unit', `unit:${file.relPath}`) as { id: number } | undefined

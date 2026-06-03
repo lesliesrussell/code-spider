@@ -17,6 +17,12 @@ export default async function run(ctx: CliContext): Promise<void> {
     dbPath,
   })
 
+  // code-spider-oun
+  const incremental = ctx.flags['incremental'] === true
+  if (incremental && !ctx.flags['semantic']) {
+    console.log('Note: --incremental affects semantic enrichment; the structural sweep is always full. Add --semantic to benefit.')
+  }
+
   if (ctx.flags['semantic']) {
     // code-spider-mbc
     // --max-files <n> raises/lowers the enrichment cap; 0 or "all" lifts it.
@@ -43,11 +49,15 @@ export default async function run(ctx: CliContext): Promise<void> {
       dbPath,
       // code-spider-mbc
       ...(maxFiles !== undefined ? { maxFiles } : {}),
+      // code-spider-oun
+      incremental,
     })
     if (ctx.json) {
       console.log(JSON.stringify({ ...result, enrichment: enrichResult }))
     } else {
-      console.log(`✓ Semantic: ${enrichResult.symbolsAdded} symbols, ${enrichResult.diagnosticsAdded} diagnostics`)
+      // code-spider-oun
+      const carriedStr = enrichResult.filesCarried > 0 ? ` (${enrichResult.filesCarried} files carried forward)` : ''
+      console.log(`✓ Semantic: ${enrichResult.symbolsAdded} symbols, ${enrichResult.diagnosticsAdded} diagnostics${carriedStr}`)
       // code-spider-5rz
       if (enrichResult.filesSkipped > 0) {
         console.log(`  Note: ${enrichResult.filesSkipped} files beyond the enrichment cap were skipped`)
