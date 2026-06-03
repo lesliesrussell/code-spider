@@ -44,11 +44,15 @@ code-spider show --repo /path/to/repo --db /tmp/repo-code-spider.db unit:src/mai
 code-spider related --repo /path/to/repo --db /tmp/repo-code-spider.db unit:src/main.ts
 ```
 
-Interpret the sections as:
-- `History`: recent commit-message rationale
-- `Context`: markdown sections that explicitly document the file
-- `Work`: issue/task context when Beads data is usable
+Interpret the `show` sections as:
+- `Stats`: churn/LOC/score metrics for the node
+- `Git Context`: recent commit-message rationale
+- `Docs Context`: markdown sections that explicitly document the file
+- `Tracked Issues`: issue/task context when Beads data is usable
 - `Evidence`: direct supporting signals for the node
+
+Prefer `--json` when you intend to parse output programmatically — every
+command supports it, and field names are stabler than human headings.
 
 ### 4. Add semantic depth when available
 
@@ -60,12 +64,28 @@ code-spider refs --repo /path/to/repo --db /tmp/repo-code-spider.db SymbolName
 code-spider atoms --repo /path/to/repo --db /tmp/repo-code-spider.db unit:src/main.ts
 ```
 
-Use `doctor` to decide whether semantic results are trustworthy:
+Use `doctor` to decide whether semantic results are trustworthy. Scopes
+narrow the report: `doctor semantic` (analyzer readiness + coverage),
+`doctor repo` (tooling, database, enrichers), `doctor perf` (size/db).
+
 - `Selected plugins` shows which built-in plugin path is active per detected language
 - `Selected analyzers` shows which concrete tools that plugin can use in the current environment
-- `symbolNavigation: true` means symbol extraction succeeded in the last run
-- `semanticRefs: true` means references are usable
-- `diagnostics: true` means analyzers produced diagnostic coverage
+- Semantic fidelity fields (`symbolNavigation`, `semanticRefs`, `diagnostics`)
+  are tri-state, not boolean:
+  - `'pass'` — exercised and succeeded in the last run; trust it
+  - `'warn'` — analyzer available but the last run never exercised it
+    (e.g. structural-only index). NOT verified — run `index --semantic` first
+  - `'fail'` — exercised and produced nothing, or no analyzer available
+- In `--json`, read `recommendations`: it lists the concrete next commands
+  (e.g. "run: code-spider index --semantic") so you don't have to interpret
+  fidelity states yourself
+
+Semantic enrichment caps at 100 files by default; the CLI prints a note when
+files were skipped. Use `index --semantic --max-files <n|all>` to raise or
+lift the cap for full-repo enrichment.
+
+When something silently degrades, re-run any command with
+`CODE_SPIDER_DEBUG=1` to surface suppressed errors on stderr.
 
 ## Example workflows
 
@@ -106,21 +126,19 @@ If the selected plugin path is unavailable, degraded, or last-run coverage is po
 
 ## Ignore config
 
-If output is noisy, create or recommend `.code-spider/config.yaml`:
+Common cache/self-referential dirs (`.git`, `node_modules`, `dist`,
+`.code-spider`, `.claude`, `.omc`, `.zig-cache`, `zig-out`, …) are ignored by
+default across indexing, doctor, LSP collection, and flow detection. For
+project-specific noise, create or recommend `.code-spider/config.yaml`:
 
 ```yaml
 ignore:
   dirs:
-    - .code-spider
-    - .claude
-    - .nardo
-    - .omc
-    - .zig-cache
-    - zig-out
+    - generated
+    - bench-results
   globs:
     - "*.db"
-    - "*.db-wal"
-    - "*.db-shm"
+    - "*.generated.ts"
 ```
 
 ## Guidance for Claude-style investigation
