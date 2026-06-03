@@ -13,6 +13,8 @@ export interface RunnerSymbolResult {
   symbols: LspSymbol[]
   mode?: 'lsp' | 'heuristic'
   error?: string
+  // code-spider-7be
+  errorKind?: 'no-symbols'
 }
 
 export interface RunnerDiagnosticsResult {
@@ -191,6 +193,8 @@ export class AnalyzerRunner {
       symbols: result.items as LspSymbol[],
       mode: result.mode === 'heuristic' ? 'heuristic' : (result.mode === 'lsp' ? 'lsp' : undefined),
       error: result.error,
+      // code-spider-7be
+      errorKind: result.errorKind,
     }
   }
 

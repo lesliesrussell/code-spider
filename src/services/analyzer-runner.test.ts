@@ -407,4 +407,54 @@ describe('AnalyzerRunner', () => {
 
     expect(analyzerRun).toEqual({ capability: 'defs', status: 'success' })
   })
+
+  // code-spider-7be
+  test('marks empty symbol results with structured errorKind no-symbols', async () => {
+    const repoRoot = makeTempDir('code-spider-runner-nosym')
+    mkdirSync(join(repoRoot, 'src'), { recursive: true })
+    writeFileSync(join(repoRoot, 'src', 'empty.ts'), '// only a comment, no symbols\n')
+
+    const dbPath = makeTempDbPath('code-spider-runner-nosym-db')
+    const { db, runId, nodeId } = seedRunAndNode(dbPath, repoRoot, 'src/empty.ts', 'TypeScript')
+
+    const registry: AnalyzerRegistryDocument = {
+      version: 1,
+      capabilities: ['symbols', 'defs', 'refs', 'diagnostics'],
+      languages: [{
+        id: 'typescript',
+        display_name: 'TypeScript',
+        aliases: ['ts'],
+        detect: { extensions: ['.ts'] },
+        analyzers: [{
+          id: 'ts-basic-heuristic',
+          kind: 'heuristic',
+          tool: 'builtin',
+          command: ['heuristic-symbols'],
+          capabilities: ['symbols'],
+          priority: 10,
+        }],
+      }],
+    }
+
+    const runner = new AnalyzerRunner({
+      registry,
+      commandExists: bin => bin === 'builtin',
+    })
+
+    runner.registerAnalyzers(db, runId, repoRoot, ['TypeScript'])
+    const result = await runner.executeSymbols({
+      db,
+      runId,
+      nodeId,
+      filePath: join(repoRoot, 'src', 'empty.ts'),
+      repoRoot,
+      language: 'TypeScript',
+      target: 'src/empty.ts',
+    })
+
+    expect(result.symbols).toHaveLength(0)
+    expect(result.error).toBe(`no-symbols: ${join(repoRoot, 'src', 'empty.ts')}`)
+    // Consumers classify benign empties via errorKind, never by string match
+    expect(result.errorKind).toBe('no-symbols')
+  })
 })

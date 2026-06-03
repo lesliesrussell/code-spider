@@ -103,6 +103,11 @@ export interface PluginResult<T> {
   mode?: string
   attempts: PluginExecutionAttempt[]
   error?: string
+  // code-spider-7be
+  // Machine-readable classification of `error`. 'no-symbols' marks a benign
+  // empty result (file has no extractable symbols) as opposed to a real
+  // analyzer failure — consumers must check this, never match error strings.
+  errorKind?: 'no-symbols'
 }
 
 export interface PluginExecutionAttempt {

@@ -80,7 +80,8 @@ export class SemanticEnricher {
           language: node.language,
           target: node.path,
         })
-        if (symbolResult.error !== undefined && symbolResult.error !== 'no-symbols: ' + node.path) {
+        // code-spider-7be
+        if (symbolResult.error !== undefined && symbolResult.errorKind !== 'no-symbols') {
           errors++
           insertEvidence.run(runId, node.id, null, 'lsp', node.path, null, symbolResult.error, 0)
         }

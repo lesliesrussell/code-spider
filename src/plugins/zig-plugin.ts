@@ -145,7 +145,8 @@ export class ZigPlugin implements LanguagePlugin {
       }
     }
 
-    return { items: [], pluginId: this.id, attempts, error: `no-symbols: ${ctx.filePath}` }
+    // code-spider-7be
+    return { items: [], pluginId: this.id, attempts, error: `no-symbols: ${ctx.filePath}`, errorKind: 'no-symbols' }
   }
 
   async getDiagnostics(ctx: PluginContext): Promise<PluginResult<PluginDiagnostic>> {
