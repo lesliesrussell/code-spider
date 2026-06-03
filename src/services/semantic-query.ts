@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface DefinitionMatch {
   symbolId: number
@@ -71,7 +73,9 @@ function parseRange(rangeJson: string | null): RangeShape | null {
   if (!rangeJson) return null
   try {
     return JSON.parse(rangeJson) as RangeShape
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('semantic-query', 'malformed range JSON in symbols table', err)
     return null
   }
 }
@@ -81,7 +85,9 @@ function isHeuristic(metadataJson: string | null): boolean {
   try {
     const metadata = JSON.parse(metadataJson) as { mode?: string }
     return metadata.mode === 'heuristic'
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('semantic-query', 'malformed metadata JSON in symbols table', err)
     return false
   }
 }
@@ -91,7 +97,9 @@ function isLowSignal(metadataJson: string | null): boolean {
   try {
     const metadata = JSON.parse(metadataJson) as { signal?: string }
     return metadata.signal === 'low'
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('semantic-query', 'malformed metadata JSON in symbols table', err)
     return false
   }
 }

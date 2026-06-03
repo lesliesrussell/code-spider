@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 import type { Database } from 'bun:sqlite'
 import { loadDefaultAnalyzerRegistry } from '../analyzer-registry-loader'
 import type { AnalyzerCapability, AnalyzerRegistryDocument } from '../analyzer-registry'
@@ -63,7 +65,9 @@ function defaultCommandExists(bin: string): boolean {
   try {
     execSync(`which ${bin}`, { stdio: 'ignore', timeout: 2000 })
     return true
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('analyzer-runner', `binary not on PATH: ${bin}`, err)
     return false
   }
 }

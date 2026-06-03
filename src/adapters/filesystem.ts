@@ -1,5 +1,7 @@
 import { readdirSync, statSync, existsSync, readFileSync } from 'node:fs'
 import { join, relative, extname, basename } from 'node:path'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface FileEntry {
   path: string      // absolute path
@@ -95,7 +97,9 @@ function loadIgnoreConfig(root: string): IgnoreConfig {
     }
 
     return config
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('config', `failed to read ${configPath}`, err)
     return { dirs: [], globs: [] }
   }
 }
@@ -171,7 +175,9 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
   let entries: import('node:fs').Dirent<string>[]
   try {
     entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('fs', `failed to read dir ${dir}`, err)
     return
   }
 
@@ -186,7 +192,9 @@ function walkDir(dir: string, root: string, results: FileEntry[], rules: IgnoreR
       let size = 0
       try {
         size = statSync(fullPath).size
-      } catch {
+      } catch (err) {
+        // code-spider-bik
+        debugLog('fs', `failed to stat ${fullPath}`, err)
         // skip unreadable
       }
       const relPath = relative(root, fullPath)
@@ -284,7 +292,9 @@ export class FilesystemAdapter {
           })
         }
       }
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('fs', `failed to scan ${root} for manifests`, err)
       // ignore
     }
 

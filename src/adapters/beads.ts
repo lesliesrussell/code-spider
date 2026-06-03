@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface BeadsDependency {
   issue_id: string
@@ -41,7 +43,9 @@ export class BeadsAdapter {
         typeof (item as { id?: unknown }).id === 'string' &&
         typeof (item as { title?: unknown }).title === 'string'
       ))
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('beads', 'bd list failed or returned malformed JSON', err)
       return []
     }
   }

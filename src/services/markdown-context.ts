@@ -1,4 +1,6 @@
 import { basename, extname } from 'node:path'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 import { readFileSync } from 'node:fs'
 import type { Database } from 'bun:sqlite'
 
@@ -155,7 +157,9 @@ export class MarkdownContextIndexer {
       let raw = ''
       try {
         raw = readFileSync(`${repoRoot}/${unit.path}`, 'utf8')
-      } catch {
+      } catch (err) {
+        // code-spider-bik
+        debugLog('markdown-context', `failed to read ${unit.path}`, err)
         continue
       }
 

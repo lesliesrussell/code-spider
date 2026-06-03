@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface GitCommitRecord {
   hash: string
@@ -17,7 +19,9 @@ export class GitAdapter {
         stdio: ['ignore', 'pipe', 'ignore'],
       })
       return result.trim() || null
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('git', 'git command failed', err)
       return null
     }
   }
@@ -29,7 +33,9 @@ export class GitAdapter {
         stdio: ['ignore', 'pipe', 'ignore'],
       })
       return output.trim() !== ''
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('git', 'git command failed', err)
       return null
     }
   }
@@ -59,7 +65,9 @@ export class GitAdapter {
           churnMap.set(k, v)
         }
       }
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('git', 'git history query failed', err)
       // git not available or not a repo
     }
     return churnMap
@@ -95,7 +103,9 @@ export class GitAdapter {
           }
         }
       }
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('git', 'git history query failed', err)
       // git not available or not a repo
     }
     return recencyMap
@@ -148,7 +158,9 @@ export class GitAdapter {
       }
 
       if (current !== null) commits.push(current)
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('git', 'git history query failed', err)
       // git not available or not a repo
     }
     return commits.filter(commit => commit.hash !== '')

@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import { openDb } from '../db/init'
 import { AnalyzerRunner } from './analyzer-runner'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface EnrichOptions {
   repoRoot: string
@@ -137,7 +139,9 @@ export class SemanticEnricher {
         const msg = err instanceof Error ? err.message : String(err)
         try {
           insertEvidence.run(runId, node.id, null, 'lsp', node.path, null, msg, 0)
-        } catch {
+        } catch (evidenceErr) {
+          // code-spider-bik
+          debugLog('semantic-enricher', `failed to record error evidence for ${node.path}`, evidenceErr)
           // best-effort
         }
       }

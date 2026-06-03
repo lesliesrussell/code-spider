@@ -1,3 +1,6 @@
+// code-spider-bik
+import { debugLog } from '../utils/debug'
+
 export class LineCountAdapter {
   async countLines(filePath: string): Promise<number> {
     try {
@@ -9,7 +12,9 @@ export class LineCountAdapter {
       // If file is non-empty and doesn't end with newline, count the last line
       if (text.length > 0 && text[text.length - 1] !== '\n') count++
       return count
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('line-count', `failed to read ${filePath}`, err)
       return 0
     }
   }

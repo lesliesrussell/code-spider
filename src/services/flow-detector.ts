@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // code-spider-c6v
 import { buildIgnoreRules } from '../adapters/filesystem'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface Flow {
   key: string
@@ -95,7 +97,9 @@ function readPackageDeps(repoRoot: string): Set<string> {
       }
     }
     return deps
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('flow-detector', 'failed to read package.json deps', err)
     return new Set<string>()
   }
 }
@@ -106,7 +110,9 @@ function hasPackageField(repoRoot: string, field: string): boolean {
     const raw = readFileSync(join(repoRoot, 'package.json'), 'utf8')
     const pkg = JSON.parse(raw) as Record<string, unknown>
     return pkg[field] !== undefined
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('flow-detector', `failed to read package.json field ${field}`, err)
     return false
   }
 }
@@ -159,12 +165,16 @@ async function ripgrep(pattern: string, repoRoot: string): Promise<RipgrepHit[]>
             snippet: parsed.data.lines?.text?.trim() ?? '',
           })
         }
-      } catch {
+      } catch (err) {
+        // code-spider-bik
+        debugLog('flow-detector', 'malformed rg JSON line', err)
         // skip malformed JSON lines
       }
     }
     return hits
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('flow-detector', `rg search failed for pattern ${pattern}`, err)
     // rg not available
     return []
   }

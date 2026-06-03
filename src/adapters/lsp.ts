@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { relative } from 'node:path'
 // code-spider-c6v
 import { buildIgnoreRules, shouldIgnoreFile } from './filesystem'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export interface LspSymbol {
   name: string
@@ -214,12 +216,16 @@ async function tryRealLspDocumentSymbols(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `failed to spawn ${bin}`, err)
       resolve(null)
       return
     }
 
     const timer = setTimeout(() => {
+      // code-spider-bik
+      debugLog('lsp', `request timed out after 10s: ${filePath}`)
       try { proc.kill() } catch { /* ignore */ }
       resolve(null)
     }, 10000)
@@ -238,7 +244,12 @@ async function tryRealLspDocumentSymbols(
     let text = ''
     try {
       text = readFileSync(filePath, 'utf8')
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      // Clean up the spawned server and pending timer on this early exit.
+      debugLog('lsp', `failed to read ${filePath}`, err)
+      clearTimeout(timer)
+      try { proc.kill() } catch { /* ignore */ }
       resolve(null)
       return
     }
@@ -258,7 +269,11 @@ async function tryRealLspDocumentSymbols(
         buf = buf.slice(bodyStart + len)
 
         let msg: { id?: number; result?: unknown; method?: string }
-        try { msg = JSON.parse(body) } catch { continue }
+        try { msg = JSON.parse(body) } catch (err) {
+          // code-spider-bik
+          debugLog('lsp', 'malformed JSON-RPC body', err)
+          continue
+        }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -281,7 +296,12 @@ async function tryRealLspDocumentSymbols(
       }
     })
 
-    proc.on('error', () => { clearTimeout(timer); resolve(null) })
+    proc.on('error', (err: Error) => {
+      // code-spider-bik
+      debugLog('lsp', `server process error: ${filePath}`, err)
+      clearTimeout(timer)
+      resolve(null)
+    })
     proc.on('close', () => { clearTimeout(timer); resolve(symbols.length > 0 ? symbols : null) })
 
     // Send initialize
@@ -312,12 +332,16 @@ async function tryRealLspReferences(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `failed to spawn ${bin}`, err)
       resolve(null)
       return
     }
 
     const timer = setTimeout(() => {
+      // code-spider-bik
+      debugLog('lsp', `request timed out after 10s: ${filePath}`)
       try { proc.kill() } catch { /* ignore */ }
       resolve(null)
     }, 10000)
@@ -335,7 +359,12 @@ async function tryRealLspReferences(
     let text = ''
     try {
       text = readFileSync(filePath, 'utf8')
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      // Clean up the spawned server and pending timer on this early exit.
+      debugLog('lsp', `failed to read ${filePath}`, err)
+      clearTimeout(timer)
+      try { proc.kill() } catch { /* ignore */ }
       resolve(null)
       return
     }
@@ -355,7 +384,11 @@ async function tryRealLspReferences(
         buf = buf.slice(bodyStart + len)
 
         let msg: { id?: number; result?: unknown }
-        try { msg = JSON.parse(body) } catch { continue }
+        try { msg = JSON.parse(body) } catch (err) {
+          // code-spider-bik
+          debugLog('lsp', 'malformed JSON-RPC body', err)
+          continue
+        }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -394,7 +427,12 @@ async function tryRealLspReferences(
       }
     })
 
-    proc.on('error', () => { clearTimeout(timer); resolve(null) })
+    proc.on('error', (err: Error) => {
+      // code-spider-bik
+      debugLog('lsp', `server process error: ${filePath}`, err)
+      clearTimeout(timer)
+      resolve(null)
+    })
     proc.on('close', () => { clearTimeout(timer); resolve(null) })
 
     send({
@@ -424,12 +462,16 @@ async function tryRealLspDefinitions(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `failed to spawn ${bin}`, err)
       resolve(null)
       return
     }
 
     const timer = setTimeout(() => {
+      // code-spider-bik
+      debugLog('lsp', `request timed out after 10s: ${filePath}`)
       try { proc.kill() } catch { /* ignore */ }
       resolve(null)
     }, 10000)
@@ -460,7 +502,11 @@ async function tryRealLspDefinitions(
         buf = buf.slice(bodyStart + len)
 
         let msg: { id?: number; result?: unknown }
-        try { msg = JSON.parse(body) } catch { continue }
+        try { msg = JSON.parse(body) } catch (err) {
+          // code-spider-bik
+          debugLog('lsp', 'malformed JSON-RPC body', err)
+          continue
+        }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -502,7 +548,12 @@ async function tryRealLspDefinitions(
       }
     })
 
-    proc.on('error', () => { clearTimeout(timer); resolve(null) })
+    proc.on('error', (err: Error) => {
+      // code-spider-bik
+      debugLog('lsp', `server process error: ${filePath}`, err)
+      clearTimeout(timer)
+      resolve(null)
+    })
     proc.on('close', () => { clearTimeout(timer); resolve(null) })
 
     send({
@@ -530,7 +581,9 @@ async function tryRealLspDiagnostics(
     let proc: ReturnType<typeof spawn>
     try {
       proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `failed to spawn ${bin}`, err)
       resolve(null)
       return
     }
@@ -560,7 +613,12 @@ async function tryRealLspDiagnostics(
     let text = ''
     try {
       text = readFileSync(filePath, 'utf8')
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      // proc is already running and no timer exists yet — kill it here or the
+      // LSP server outlives the request as a zombie.
+      debugLog('lsp', `failed to read ${filePath}`, err)
+      try { proc.kill() } catch { /* ignore */ }
       resolve(null)
       return
     }
@@ -587,7 +645,11 @@ async function tryRealLspDiagnostics(
         buf = buf.slice(bodyStart + len)
 
         let msg: { id?: number; result?: unknown; method?: string; params?: unknown }
-        try { msg = JSON.parse(body) } catch { continue }
+        try { msg = JSON.parse(body) } catch (err) {
+          // code-spider-bik
+          debugLog('lsp', 'malformed JSON-RPC body', err)
+          continue
+        }
 
         if (!initialized && msg.id === 1 && msg.result !== undefined) {
           initialized = true
@@ -613,7 +675,9 @@ async function tryRealLspDiagnostics(
       }
     })
 
-    proc.on('error', () => {
+    proc.on('error', (err: Error) => {
+      // code-spider-bik
+      debugLog('lsp', `diagnostics server process error: ${filePath}`, err)
       clearTimeout(overallTimer)
       if (idleTimer !== undefined) clearTimeout(idleTimer)
       resolve(null)
@@ -653,7 +717,9 @@ export class LspAdapter {
         if (realSymbols !== null && realSymbols.length > 0) {
           return { filePath, symbols: realSymbols, diagnostics: [] }
         }
-      } catch {
+      } catch (err) {
+        // code-spider-bik
+        debugLog('lsp', `request failed, degrading: ${filePath}`, err)
         // fall through
       }
     }
@@ -685,7 +751,9 @@ export class LspAdapter {
       const workspaceFiles = workspacePaths.flatMap(path => {
         try {
           return [{ path, text: readFileSync(path, 'utf8') }]
-        } catch {
+        } catch (err) {
+          // code-spider-bik
+          debugLog('lsp', `failed to read workspace file ${path}`, err)
           return []
         }
       })
@@ -709,7 +777,9 @@ export class LspAdapter {
           })),
         }
       }
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `request failed, degrading: ${filePath}`, err)
       // fall through
     }
 
@@ -736,7 +806,9 @@ export class LspAdapter {
       const workspaceFiles = workspacePaths.flatMap(path => {
         try {
           return [{ path, text: readFileSync(path, 'utf8') }]
-        } catch {
+        } catch (err) {
+          // code-spider-bik
+          debugLog('lsp', `failed to read workspace file ${path}`, err)
           return []
         }
       })
@@ -759,7 +831,9 @@ export class LspAdapter {
           })),
         }
       }
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `request failed, degrading: ${filePath}`, err)
       // fall through
     }
 
@@ -784,7 +858,9 @@ export class LspAdapter {
       if (diagnostics !== null) {
         return { diagnostics }
       }
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('lsp', `request failed, degrading: ${filePath}`, err)
       // fall through
     }
 

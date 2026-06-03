@@ -8,6 +8,8 @@ import { BuiltinLanguagePluginRegistry } from '../language-plugin-registry'
 import { openDb } from '../db/init'
 // code-spider-c6v
 import { buildIgnoreRules, shouldIgnoreFile } from '../adapters/filesystem'
+// code-spider-bik
+import { debugLog } from '../utils/debug'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
@@ -94,7 +96,9 @@ function coverageModeForCapability(capability: AnalyzerCapability): 'sweep' | 'o
 function tryExec(cmd: string): string | null {
   try {
     return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).toString().trim()
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('doctor', `command failed: ${cmd}`, err)
     return null
   }
 }
@@ -140,7 +144,9 @@ function walkRepoFiles(root: string, maxEntries = 2000): string[] {
     let entries: import('node:fs').Dirent<string>[]
     try {
       entries = readdirSync(fullDir, { withFileTypes: true, encoding: 'utf8' })
-    } catch {
+    } catch (err) {
+      // code-spider-bik
+      debugLog('doctor', `failed to read dir ${fullDir}`, err)
       continue
     }
 
@@ -307,7 +313,9 @@ function checkDatabase(dbPath: string): { check: Check; db: Database | null; las
       lastRunDate: dateStr,
       fileCount,
     }
-  } catch {
+  } catch (err) {
+    // code-spider-bik
+    debugLog('doctor', 'failed to read database', err)
     return {
       check: { name: 'database', status: 'warn', message: 'database exists but could not be read' },
       db,
