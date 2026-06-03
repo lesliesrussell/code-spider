@@ -59,49 +59,63 @@ function normalizeYamlScalar(value: string): string {
   return trimmed
 }
 
-function loadIgnoreConfig(root: string): IgnoreConfig {
+// code-spider-a6t
+// Generic parser for the flat config.yaml shape: top-level sections, each
+// holding named string lists. `ignore:` and `flows:` both use it. Unlike the
+// old ignore-only parser, leaving a section on the next top-level key is
+// handled correctly, so sections can appear in any order.
+export function loadUserConfigSection(root: string, section: string): Record<string, string[]> {
   const configPath = join(root, '.code-spider', 'config.yaml')
   if (!existsSync(configPath)) {
-    return { dirs: [], globs: [] }
+    return {}
   }
 
   try {
     const text = readFileSync(configPath, 'utf8')
-    const config: IgnoreConfig = { dirs: [], globs: [] }
-    let inIgnoreSection = false
-    let currentList: keyof IgnoreConfig | null = null
+    const lists: Record<string, string[]> = {}
+    let inSection = false
+    let currentList: string | null = null
 
     for (const rawLine of text.split(/\r?\n/)) {
       const line = stripInlineComment(rawLine)
       const trimmed = line.trim()
       if (trimmed === '') continue
 
-      if (!line.startsWith(' ') && trimmed === 'ignore:') {
-        inIgnoreSection = true
+      if (!line.startsWith(' ')) {
+        inSection = trimmed === `${section}:`
         currentList = null
         continue
       }
 
-      if (!inIgnoreSection) continue
+      if (!inSection) continue
 
-      const listMatch = /^\s+(dirs|globs):\s*$/.exec(line)
+      const listMatch = /^\s+([A-Za-z_][\w-]*):\s*$/.exec(line)
       if (listMatch) {
-        currentList = listMatch[1] as keyof IgnoreConfig
+        currentList = listMatch[1] ?? null
+        if (currentList !== null && lists[currentList] === undefined) {
+          lists[currentList] = []
+        }
         continue
       }
 
       const itemMatch = /^\s*-\s*(.+?)\s*$/.exec(line)
       if (itemMatch && currentList !== null) {
-        config[currentList].push(normalizeYamlScalar(itemMatch[1] ?? ''))
+        lists[currentList]!.push(normalizeYamlScalar(itemMatch[1] ?? ''))
       }
     }
 
-    return config
+    return lists
   } catch (err) {
     // code-spider-bik
     debugLog('config', `failed to read ${configPath}`, err)
-    return { dirs: [], globs: [] }
+    return {}
   }
+}
+
+// code-spider-a6t
+function loadIgnoreConfig(root: string): IgnoreConfig {
+  const lists = loadUserConfigSection(root, 'ignore')
+  return { dirs: lists['dirs'] ?? [], globs: lists['globs'] ?? [] }
 }
 
 function globToRegExp(glob: string): RegExp {

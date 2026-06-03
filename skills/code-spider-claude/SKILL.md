@@ -141,6 +141,12 @@ ignore:
     - "*.generated.ts"
 ```
 
+For non-Node ecosystems, a `flows:` section extends flow detection with
+project-specific deps and rg patterns (`route_deps`, `route_patterns`,
+`queue_deps`, `queue_patterns`, `event_deps`, `event_patterns`,
+`cli_patterns`). Each category adds at most one strong signal — recommend
+this when `flows` is empty on a Python/Rust/Lisp repo.
+
 ## Guidance for Claude-style investigation
 
 - Prefer `inspect` before `index`.

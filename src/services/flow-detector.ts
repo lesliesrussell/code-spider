@@ -1,8 +1,8 @@
 import { Database } from 'bun:sqlite'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-// code-spider-c6v
-import { buildIgnoreRules } from '../adapters/filesystem'
+// code-spider-c6v code-spider-a6t
+import { buildIgnoreRules, loadUserConfigSection } from '../adapters/filesystem'
 // code-spider-bik
 import { debugLog } from '../utils/debug'
 
@@ -221,6 +221,38 @@ const ROUTE_FRAMEWORKS = ['express', 'fastify', 'hono', 'koa', '@hapi/hapi', '@n
 const QUEUE_LIBS = ['bullmq', 'bull', 'bee-queue', 'amqplib', 'amqp-connection-manager', 'kafkajs', 'agenda', 'kue', 'rsmq', '@aws-sdk/client-sqs', 'sqs-consumer']
 const EVENT_LIBS = ['eventemitter3', 'eventemitter2', 'mitt', 'nanoevents', 'rxjs']
 
+// code-spider-a6t
+// Project-declared flow signals from .code-spider/config.yaml `flows:`. The
+// builtin lists above are Node/web-centric; other ecosystems (Python, Rust,
+// Lisp) extend them here. Discipline from code-spider-9ld is preserved: each
+// category contributes at most ONE strong signal no matter how many user
+// deps/patterns match — user config widens detection, it cannot inflate
+// confidence.
+interface UserFlowConfig {
+  routeDeps: string[]
+  routePatterns: string[]
+  queueDeps: string[]
+  queuePatterns: string[]
+  eventDeps: string[]
+  eventPatterns: string[]
+  cliPatterns: string[]
+}
+
+// code-spider-a6t
+function loadUserFlowConfig(repoRoot: string): UserFlowConfig {
+  const lists = loadUserConfigSection(repoRoot, 'flows')
+  const lower = (items: string[] | undefined): string[] => (items ?? []).map(item => item.toLowerCase())
+  return {
+    routeDeps: lower(lists['route_deps']),
+    routePatterns: lists['route_patterns'] ?? [],
+    queueDeps: lower(lists['queue_deps']),
+    queuePatterns: lists['queue_patterns'] ?? [],
+    eventDeps: lower(lists['event_deps']),
+    eventPatterns: lists['event_patterns'] ?? [],
+    cliPatterns: lists['cli_patterns'] ?? [],
+  }
+}
+
 export class FlowDetector {
   constructor(private db: Database, private runId: number) {}
 
@@ -229,9 +261,11 @@ export class FlowDetector {
 
     // code-spider-dvb
     const pkg = loadPackageInfo(repoRoot)
-    const routeFlow = await this.detectRoutes(repoRoot, pkg)
-    const eventFlows = await this.detectEvents(repoRoot, pkg)
-    const cliFlow = await this.detectCli(repoRoot, pkg)
+    // code-spider-a6t
+    const userFlows = loadUserFlowConfig(repoRoot)
+    const routeFlow = await this.detectRoutes(repoRoot, pkg, userFlows)
+    const eventFlows = await this.detectEvents(repoRoot, pkg, userFlows)
+    const cliFlow = await this.detectCli(repoRoot, pkg, userFlows)
 
     for (const flow of [routeFlow, ...eventFlows, cliFlow]) {
       if (flow !== null) flows.push(flow)
@@ -309,6 +343,26 @@ export class FlowDetector {
   }
 
   // Resolve a ripgrep absolute path to a unit node key.
+  // code-spider-a6t
+  // Run each user-configured pattern; any hit adds ONE strong signal for the
+  // whole category (never one per pattern), keeping the 9ld discipline.
+  private async addUserPatternSignal(builder: FlowBuilder, patterns: string[], repoRoot: string): Promise<void> {
+    let matched = false
+    for (const pattern of patterns) {
+      const hits = await ripgrep(pattern, repoRoot)
+      if (hits.length === 0) continue
+      if (!matched) {
+        matched = true
+        builder.addStrongSignal()
+      }
+      for (const hit of hits) {
+        builder.addEvidence(`config-pattern: ${hit.path}: ${hit.snippet}`.slice(0, EVIDENCE_SNIPPET_LEN))
+        const key = this.nodeKeyForPath(repoRoot, hit.path)
+        if (key) builder.addNode(key)
+      }
+    }
+  }
+
   private nodeKeyForPath(repoRoot: string, absPath: string): string | null {
     const relPath = absPath.replace(repoRoot + '/', '')
     const node = this.db.query<NodeRow, [number, string]>(
@@ -318,15 +372,17 @@ export class FlowDetector {
   }
 
   // code-spider-9ld
-  private async detectRoutes(repoRoot: string, pkg: PackageInfo): Promise<Flow | null> {
+  private async detectRoutes(repoRoot: string, pkg: PackageInfo, user: UserFlowConfig): Promise<Flow | null> {
     const builder = new FlowBuilder()
     // code-spider-dvb
     const deps = pkg.deps
 
     // STRONG: a real web framework dependency.
-    if (intersects(deps, ROUTE_FRAMEWORKS)) {
+    // code-spider-a6t
+    const routeFrameworks = [...ROUTE_FRAMEWORKS, ...user.routeDeps]
+    if (intersects(deps, routeFrameworks)) {
       builder.addStrongSignal()
-      builder.addEvidence(`dependency: web framework (${ROUTE_FRAMEWORKS.find(f => deps.has(f))})`)
+      builder.addEvidence(`dependency: web framework (${routeFrameworks.find(f => deps.has(f))})`)
     }
 
     // STRONG: actual route-registration call sites.
@@ -355,6 +411,10 @@ export class FlowDetector {
       }
     }
 
+    // STRONG (project-configured): route patterns from config.yaml flows:.
+    // code-spider-a6t
+    await this.addUserPatternSignal(builder, user.routePatterns, repoRoot)
+
     // WEAK: symbol names that merely contain route-ish words. Only enrich an
     // already-corroborated flow; never trigger one alone.
     const routeSymbols = this.db.query<SymbolRow, [number, string, string, string, string]>(
@@ -375,28 +435,31 @@ export class FlowDetector {
   }
 
   // code-spider-9ld
-  private async detectEvents(repoRoot: string, pkg: PackageInfo): Promise<Flow[]> {
+  private async detectEvents(repoRoot: string, pkg: PackageInfo, user: UserFlowConfig): Promise<Flow[]> {
     const flows: Flow[] = []
     // code-spider-dvb
     const deps = pkg.deps
 
-    const queue = await this.detectQueueWorkers(repoRoot, deps)
+    // code-spider-a6t
+    const queue = await this.detectQueueWorkers(repoRoot, deps, user)
     if (queue !== null) flows.push(queue)
 
-    const events = await this.detectEventBus(repoRoot, deps)
+    const events = await this.detectEventBus(repoRoot, deps, user)
     if (events !== null) flows.push(events)
 
     return flows
   }
 
   // code-spider-9ld
-  private async detectQueueWorkers(repoRoot: string, deps: Set<string>): Promise<Flow | null> {
+  private async detectQueueWorkers(repoRoot: string, deps: Set<string>, user: UserFlowConfig): Promise<Flow | null> {
     const builder = new FlowBuilder()
 
     // STRONG: a dedicated queue/job library.
-    if (intersects(deps, QUEUE_LIBS)) {
+    // code-spider-a6t
+    const queueLibs = [...QUEUE_LIBS, ...user.queueDeps]
+    if (intersects(deps, queueLibs)) {
       builder.addStrongSignal()
-      builder.addEvidence(`dependency: queue/job library (${QUEUE_LIBS.find(l => deps.has(l))})`)
+      builder.addEvidence(`dependency: queue/job library (${queueLibs.find(l => deps.has(l))})`)
     }
 
     // STRONG: explicit queue/worker construction.
@@ -425,17 +488,22 @@ export class FlowDetector {
       }
     }
 
+    // code-spider-a6t
+    await this.addUserPatternSignal(builder, user.queuePatterns, repoRoot)
+
     return builder.build('flow:queue-workers', 'queue-workers', 'worker')
   }
 
   // code-spider-9ld
-  private async detectEventBus(repoRoot: string, deps: Set<string>): Promise<Flow | null> {
+  private async detectEventBus(repoRoot: string, deps: Set<string>, user: UserFlowConfig): Promise<Flow | null> {
     const builder = new FlowBuilder()
 
     // STRONG: a pub/sub or event-emitter library.
-    if (intersects(deps, EVENT_LIBS)) {
+    // code-spider-a6t
+    const eventLibs = [...EVENT_LIBS, ...user.eventDeps]
+    if (intersects(deps, eventLibs)) {
       builder.addStrongSignal()
-      builder.addEvidence(`dependency: event library (${EVENT_LIBS.find(l => deps.has(l))})`)
+      builder.addEvidence(`dependency: event library (${eventLibs.find(l => deps.has(l))})`)
     }
 
     // STRONG: constructing or extending an EventEmitter. Bare `.on(` / `.emit(`
@@ -451,11 +519,14 @@ export class FlowDetector {
       }
     }
 
+    // code-spider-a6t
+    await this.addUserPatternSignal(builder, user.eventPatterns, repoRoot)
+
     return builder.build('flow:event-bus', 'event-bus', 'event')
   }
 
   // code-spider-9ld
-  private async detectCli(repoRoot: string, pkg: PackageInfo): Promise<Flow | null> {
+  private async detectCli(repoRoot: string, pkg: PackageInfo, user: UserFlowConfig): Promise<Flow | null> {
     const builder = new FlowBuilder()
 
     // STRONG: argument-parsing call sites.
@@ -502,6 +573,9 @@ export class FlowDetector {
       builder.addEvidence(`file: ${n.path ?? n.label}`)
       builder.addNode(n.key)
     }
+
+    // code-spider-a6t
+    await this.addUserPatternSignal(builder, user.cliPatterns, repoRoot)
 
     return builder.build('flow:cli-commands', 'cli-commands', 'command')
   }

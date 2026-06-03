@@ -76,6 +76,27 @@ ignore:
     - "*.db-shm"
 ```
 
+Flow detection is Node/web-centric out of the box; extend it for other
+ecosystems with a `flows:` section. Each category (route/queue/event/cli)
+contributes at most one strong signal no matter how many entries match —
+config widens detection but cannot inflate confidence:
+
+```yaml
+flows:
+  route_deps:        # extra package.json deps treated as web frameworks
+    - flask
+  route_patterns:    # extra rg regexes for route registration call sites
+    - "@app\.route\("
+  queue_deps:
+    - celery
+  queue_patterns:
+    - "@task\("
+  event_deps: []
+  event_patterns: []
+  cli_patterns:
+    - "argparse\.ArgumentParser"
+```
+
 ## Architecture
 
 ```

@@ -74,6 +74,43 @@ function labels(flows: { label: string }[]): string[] {
 }
 
 describe('FlowDetector', () => {
+  // code-spider-a6t
+  test('config flows: patterns extend detection to non-Node ecosystems', async () => {
+    const { repoRoot, db } = makeRepo(
+      'flow-config',
+      [
+        // A Python web app: no package.json, builtin Node heuristics see nothing.
+        { path: 'src/app.py', content: 'from flask import Flask\napp = Flask(__name__)\n\n@app.route("/users")\ndef users():\n    return []\n' },
+        { path: '.code-spider/config.yaml', content: 'flows:\n  route_patterns:\n    - "@app\\.route\\("\n' },
+      ],
+      [],
+    )
+
+    const flows = await new FlowDetector(db, 1).detect(repoRoot)
+    const routes = flows.find(flow => flow.label === 'http-routes')
+    expect(routes).toBeDefined()
+    // One user-pattern category = one strong signal = floor confidence.
+    expect(routes!.confidence).toBe(0.5)
+    expect(routes!.evidence.some(item => item.startsWith('config-pattern:') && item.includes('src/app.py'))).toBe(true)
+    expect(routes!.nodes).toContain('unit:src/app.py')
+  })
+
+  // code-spider-a6t
+  test('config flows: patterns never fire without matches (no fabrication)', async () => {
+    const { repoRoot, db } = makeRepo(
+      'flow-config-negative',
+      [
+        { path: 'src/app.py', content: 'print("hello")\n' },
+        { path: '.code-spider/config.yaml', content: 'flows:\n  route_patterns:\n    - "@app\\.route\\("\n  queue_patterns:\n    - "celery\\.task"\n' },
+      ],
+      [],
+    )
+
+    const flows = await new FlowDetector(db, 1).detect(repoRoot)
+    expect(labels(flows)).not.toContain('http-routes')
+    expect(labels(flows)).not.toContain('queue-workers')
+  })
+
   // code-spider-9ld
   test('does NOT fabricate http/queue/event flows from name-substring noise alone', async () => {
     // Mimics the code-spider repo: a CLI tool with a local `queue` variable,
