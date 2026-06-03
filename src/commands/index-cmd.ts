@@ -18,12 +18,31 @@ export default async function run(ctx: CliContext): Promise<void> {
   })
 
   if (ctx.flags['semantic']) {
+    // code-spider-mbc
+    // --max-files <n> raises/lowers the enrichment cap; 0 or "all" lifts it.
+    let maxFiles: number | undefined
+    const maxFilesFlag = ctx.flags['max-files']
+    if (maxFilesFlag !== undefined) {
+      if (maxFilesFlag === 'all' || maxFilesFlag === '0') {
+        maxFiles = Number.POSITIVE_INFINITY
+      } else {
+        const parsed = typeof maxFilesFlag === 'string' ? parseInt(maxFilesFlag, 10) : NaN
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          console.error(`Invalid --max-files value: ${String(maxFilesFlag)} (expected a positive integer, 0, or "all")`)
+          process.exit(1)
+        }
+        maxFiles = parsed
+      }
+    }
+
     console.log('Running semantic enrichment...')
     const enricher = new SemanticEnricher()
     const enrichResult = await enricher.run({
       repoRoot: targetPath,
       runId: result.runId,
       dbPath,
+      // code-spider-mbc
+      ...(maxFiles !== undefined ? { maxFiles } : {}),
     })
     if (ctx.json) {
       console.log(JSON.stringify({ ...result, enrichment: enrichResult }))
