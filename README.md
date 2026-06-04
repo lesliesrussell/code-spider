@@ -12,7 +12,12 @@ Designed for deep exploration: languages, zones, hotspots, git context, markdown
 - **Rich navigation**:
   - `overview`, `zones`, `show <node>`, `children`, `related`, `flows`
   - Semantic: `defs`, `refs`, `atoms`
-  - Investigation management and report export
+  - Natural-language search: `find "<query>"` over `index --embed` vectors
+    (local ollama + nomic-embed-text; optional, fails soft)
+  - Investigation management (notes, pinned evidence) and report export
+  - Every command supports `--json`
+- **Incremental re-index** — `index --semantic --embed --incremental` reuses
+  results for unchanged files (observed 64s → ~1s on this repo)
 - **Context layers**:
   - Git history, co-changes, commit rationale
   - Markdown sections and nearby documentation
@@ -25,18 +30,22 @@ Perfect companion for the `code-spider-claude` and `code-spider-codex` skills in
 ## Quick Start
 
 ```bash
-# Install (Bun)
+# Get dependencies
 bun install
 
-# Build standalone binary (optional)
-bun run build
+# Option A: link globally (runs from source via bun)
+bun link            # puts `code-spider` on PATH (~/.bun/bin)
+
+# Option B: standalone single-file binary (no bun needed to run it)
+bun run build       # produces dist/code-spider (~60MB, registry embedded)
+cp dist/code-spider ~/bin/   # or anywhere on your PATH
 
 # Basic investigation flow
 code-spider inspect .                    # Non-destructive first pass
 code-spider index . --db /tmp/myrepo.db  # Build persistent index
 code-spider doctor --db /tmp/myrepo.db   # Check what is trustworthy
 code-spider overview --db /tmp/myrepo.db
-code-spider zones --db /tmp/myrepo.db --sort score
+code-spider zones --db /tmp/myrepo.db --limit 10
 ```
 
 For semantic depth (symbols, references, diagnostics):
@@ -141,6 +150,7 @@ These skills encode proven investigation recipes that combine structure, git his
 ```bash
 bun install
 bun test
+bun run typecheck      # tsc --noEmit, kept at 0 errors
 bun run build          # produces dist/code-spider
 ```
 
