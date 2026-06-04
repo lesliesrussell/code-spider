@@ -76,6 +76,32 @@ describe('scanUnitImports', () => {
     expect(records).toEqual([{ fromPath: 'src/ok.ts', toPath: 'src/b.ts', confidence: 1 }])
   })
 
+  // code-spider-cii: dogfooding reachability exposed both of these — the
+  // CLI entrypoint has a shebang (scanImports throws on it) and type-only
+  // imports are erased by the transpiler before scanning.
+  test('scans files with shebang lines', async () => {
+    const root = makeRepo({
+      'src/cli.ts': "#!/usr/bin/env bun\nimport { b } from './b'\nexport const a = b",
+      'src/b.ts': 'export const b = 1',
+    })
+    const records = await scanUnitImports(root, ['src/cli.ts', 'src/b.ts'])
+    expect(records).toEqual([{ fromPath: 'src/cli.ts', toPath: 'src/b.ts', confidence: 1 }])
+  })
+
+  test('type-only imports produce edges', async () => {
+    const root = makeRepo({
+      'src/a.ts': "import type { B } from './b'\nexport type A = { b: B }",
+      'src/b.ts': 'export interface B { x: number }',
+      'src/c.ts': "export type { C } from './d'",
+      'src/d.ts': 'export interface C { y: number }',
+    })
+    const records = await scanUnitImports(root, ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'])
+    expect(records).toEqual([
+      { fromPath: 'src/a.ts', toPath: 'src/b.ts', confidence: 1 },
+      { fromPath: 'src/c.ts', toPath: 'src/d.ts', confidence: 1 },
+    ])
+  })
+
   test('is deterministic: repeated scans return identical ordered records', async () => {
     const root = makeRepo({
       'src/a.ts': "import './b'\nimport './c'",

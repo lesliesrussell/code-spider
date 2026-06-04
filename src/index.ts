@@ -44,6 +44,7 @@ Commands:
   intelligence scan [--category <c>]   Run intelligence analyzers, list findings
                                        (reachability|cycles|duplication|hotspots|architecture)
   intelligence cycles                  Detect circular dependencies in the import graph
+  intelligence unused                  Find files unreachable from configured entrypoints
 
 Options (all commands):
   --repo <path>    Target repository (default: cwd)

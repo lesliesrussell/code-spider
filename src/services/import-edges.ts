@@ -59,6 +59,22 @@ function resolveSpecifier(fromPath: string, specifier: string, units: Set<string
   return undefined
 }
 
+// code-spider-cii
+// `import type { X } from './y'` and `export type { X } from './y'` never
+// reach scanImports output. This regex pass catches the explicit forms;
+// inline `{ type X }`-only imports can still slip through — a documented
+// residual, not a silent one.
+const TYPE_IMPORT_RE = /(?:import|export)\s+type\s[^'"]*?from\s*['"]([^'"]+)['"]/g
+
+function scanTypeOnlyImports(source: string): string[] {
+  const specifiers: string[] = []
+  for (const match of source.matchAll(TYPE_IMPORT_RE)) {
+    const specifier = match[1]
+    if (specifier !== undefined) specifiers.push(specifier)
+  }
+  return specifiers
+}
+
 export async function scanUnitImports(repoRoot: string, unitPaths: string[]): Promise<ImportRecord[]> {
   const units = new Set(unitPaths)
   // from\0to -> confidence; duplicates keep the strongest signal so a
@@ -71,8 +87,20 @@ export async function scanUnitImports(repoRoot: string, unitPaths: string[]): Pr
     if (loader === undefined) continue
     let imports: Array<{ path: string; kind: string }>
     try {
-      const source = await Bun.file(join(repoRoot, fromPath)).text()
+      // code-spider-cii: the transpiler rejects shebang lines (CLI
+      // entrypoints have them), so blank the first line out while keeping
+      // line offsets intact.
+      let source = await Bun.file(join(repoRoot, fromPath)).text()
+      if (source.startsWith('#!')) {
+        source = source.replace(/^#![^\n]*/, '')
+      }
       imports = new Bun.Transpiler({ loader }).scanImports(source)
+      // code-spider-cii: scanImports erases type-only imports (they don't
+      // survive transpilation), but for reachability a type-only-imported
+      // file is live. Supplement with a syntactic pass.
+      for (const specifier of scanTypeOnlyImports(source)) {
+        imports.push({ path: specifier, kind: 'import-statement' })
+      }
     } catch (err) {
       // Fail soft: a file the transpiler can't read or parse contributes no
       // edges; it must not poison the rest of the scan.

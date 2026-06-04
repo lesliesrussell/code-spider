@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
-import { FindingsStore } from '../services/findings'
 import runIntelligence, { runAnalyzers } from './intelligence'
 
 const tempDirs: string[] = []
@@ -94,6 +93,62 @@ describe('intelligence cycles', () => {
     }
     const out = JSON.parse(logs.lines.join('\n')) as { summary: { byCategory: Record<string, number> } }
     expect(out.summary.byCategory['cycles']).toBe(1)
+  })
+})
+
+// code-spider-cii
+describe('intelligence unused', () => {
+  test('flags units unreachable from entrypoints', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-unused')
+    const db = openDb(dbPath)
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, metadata_json) VALUES
+         (20, 1, 'unit', 'unit:src/index.ts', 'index.ts', 'src/index.ts', 'TypeScript', '{"entrypoint":true}'),
+         (21, 1, 'unit', 'unit:src/dead.ts', 'dead.ts', 'src/dead.ts', 'TypeScript', NULL)`
+    ).run()
+    db.close()
+
+    ctx.json = true
+    ctx.args = ['unused']
+    const logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const out = JSON.parse(logs.lines.join('\n')) as {
+      findings: Array<{ ruleId: string; locations: Array<{ path: string }>; confidence: string }>
+    }
+    expect(out.findings).toHaveLength(1)
+    expect(out.findings[0]!.ruleId).toBe('unused-file')
+    expect(out.findings[0]!.locations[0]!.path).toBe('src/dead.ts')
+    expect(out.findings[0]!.confidence).toBe('high')
+  })
+
+  test('warns when no entrypoints are configured', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-unused-noroots')
+    const db = openDb(dbPath)
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language) VALUES
+         (20, 1, 'unit', 'unit:src/a.ts', 'a.ts', 'src/a.ts', 'TypeScript')`
+    ).run()
+    db.close()
+
+    ctx.args = ['unused']
+    const errors: string[] = []
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(a => String(a)).join(' '))
+    }
+    const logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+      console.error = originalError
+    }
+    expect(errors.join('\n')).toContain('entrypoint')
+    expect(logs.lines.join('\n')).toContain('(no findings)')
   })
 })
 
@@ -195,28 +250,15 @@ describe('intelligence scan', () => {
 
   test('scan --category filters findings', async () => {
     const { ctx, dbPath } = makeIndexedRepo('intel-filter')
+    // Real graph state: an import cycle AND a dead file, so both analyzers
+    // produce findings and the filter has something to exclude.
+    seedImportCycle(dbPath)
     const db = openDb(dbPath)
-    const store = new FindingsStore(db, 1)
-    store.add({
-      ruleId: 'circular-dependency',
-      category: 'cycles',
-      severity: 'warning',
-      confidence: 'high',
-      title: 'Cycle',
-      summary: 'cycle',
-      anchor: 'a<->b',
-      locations: [{ path: 'a.ts' }],
-    })
-    store.add({
-      ruleId: 'unused-file',
-      category: 'reachability',
-      severity: 'warning',
-      confidence: 'medium',
-      title: 'Unused file',
-      summary: 'dead',
-      anchor: 'dead.ts',
-      locations: [{ path: 'dead.ts' }],
-    })
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, metadata_json) VALUES
+         (20, 1, 'unit', 'unit:src/main.ts', 'main.ts', 'src/main.ts', 'TypeScript', '{"entrypoint":true}'),
+         (21, 1, 'unit', 'unit:src/dead.ts', 'dead.ts', 'src/dead.ts', 'TypeScript', NULL)`
+    ).run()
     db.close()
 
     ctx.json = true

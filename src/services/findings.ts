@@ -121,14 +121,17 @@ export class FindingsStore {
     return rows.map(rowToFinding)
   }
 
-  // Same fingerprint can legitimately recur within a run (two clone regions
-  // of one class). Ids stay deterministic: bare fingerprint first, then
-  // ordinal suffixes in insertion order.
+  // Ids are deterministic but run-scoped: fingerprints are intentionally
+  // stable across runs, so the global primary key needs the run id baked in
+  // (code-spider-cii). Within a run, the same fingerprint can legitimately
+  // recur (two clone regions of one class) — ordinal suffixes in insertion
+  // order keep those distinct.
   private uniqueId(fingerprint: string): string {
+    const base = `fnd_r${this.runId}_${fingerprint}`
     const row = this.db
       .query('SELECT COUNT(*) AS n FROM findings WHERE run_id = ? AND fingerprint = ?')
       .get(this.runId, fingerprint) as { n: number }
-    return row.n === 0 ? `fnd_${fingerprint}` : `fnd_${fingerprint}-${row.n + 1}`
+    return row.n === 0 ? base : `${base}-${row.n + 1}`
   }
 }
 

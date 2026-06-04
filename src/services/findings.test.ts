@@ -71,7 +71,7 @@ describe('FindingsStore', () => {
     const store = new FindingsStore(db, 1)
     const saved = store.add(makeFinding())
 
-    expect(saved.id).toBe(`fnd_${saved.fingerprint}`)
+    expect(saved.id).toBe(`fnd_r1_${saved.fingerprint}`)
     const listed = store.list()
     expect(listed).toHaveLength(1)
     const f = listed[0]!
@@ -98,8 +98,21 @@ describe('FindingsStore', () => {
     const store = new FindingsStore(db, 1)
     const first = store.add(makeFinding())
     const second = store.add(makeFinding())
-    expect(first.id).toBe(`fnd_${first.fingerprint}`)
-    expect(second.id).toBe(`fnd_${second.fingerprint}-2`)
+    expect(first.id).toBe(`fnd_r1_${first.fingerprint}`)
+    expect(second.id).toBe(`fnd_r1_${second.fingerprint}-2`)
+  })
+
+  // code-spider-cii: fingerprints are stable across runs by design, so ids
+  // must carry a run discriminator or the second run's insert violates the
+  // global primary key.
+  test('identical findings in different runs coexist with distinct ids', () => {
+    const db = makeTempDb('findings-cross-run')
+    db.query("INSERT INTO runs (id, started_at, repo_root) VALUES (2, 't2', '/repo')").run()
+    const first = new FindingsStore(db, 1).add(makeFinding())
+    const second = new FindingsStore(db, 2).add(makeFinding())
+    expect(second.fingerprint).toBe(first.fingerprint)
+    expect(second.id).not.toBe(first.id)
+    expect(new FindingsStore(db, 2).list()).toHaveLength(1)
   })
 
   test('list filters by category', () => {

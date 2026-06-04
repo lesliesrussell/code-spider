@@ -10,13 +10,16 @@ import { FindingsStore } from '../services/findings'
 import type { Finding, FindingCategory, FindingFilter } from '../services/findings'
 // code-spider-q6b
 import { CycleAnalyzer } from '../services/cycles'
+// code-spider-cii
+import { ReachabilityAnalyzer } from '../services/reachability'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
 Subcommands:
   scan [--category <c>]   Run all intelligence analyzers and list findings
                           (categories: reachability|cycles|duplication|hotspots|architecture)
-  cycles                  Detect circular dependencies in the import graph`
+  cycles                  Detect circular dependencies in the import graph
+  unused                  Find files unreachable from configured entrypoints`
 
 const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture']
 
@@ -27,6 +30,19 @@ export type IntelAnalyzer = { name: string; category: FindingCategory; run: (db:
 
 const ANALYZERS: IntelAnalyzer[] = [
   { name: 'cycles', category: 'cycles', run: (db, runId) => void new CycleAnalyzer().analyze(db, runId) },
+  // code-spider-cii
+  {
+    name: 'reachability',
+    category: 'reachability',
+    run: (db, runId) => {
+      const { roots } = new ReachabilityAnalyzer().analyze(db, runId)
+      if (roots === 0) {
+        console.error(
+          'note: no entrypoints configured — unused-file analysis skipped (set intelligence.entrypoints in .code-spider/config.yaml and re-index)'
+        )
+      }
+    },
+  },
 ]
 
 export function runAnalyzers(
@@ -47,7 +63,7 @@ export function runAnalyzers(
 
 export default async function run(ctx: CliContext): Promise<void> {
   const sub = ctx.args[0]
-  if (sub !== 'scan' && sub !== 'cycles') {
+  if (sub !== 'scan' && sub !== 'cycles' && sub !== 'unused') {
     console.error(INTEL_USAGE)
     process.exit(1)
   }
@@ -71,6 +87,8 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
   // code-spider-q6b
   if (sub === 'cycles') filter.category = 'cycles'
+  // code-spider-cii
+  if (sub === 'unused') filter.category = 'reachability'
   runAnalyzers(db, runId, filter.category)
 
   const findings = new FindingsStore(db, runId).list(filter)
