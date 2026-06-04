@@ -41,8 +41,9 @@ Commands:
   investigate show <inv-id>            Show an investigation
   export report <node-ref|inv-id> [--format md|json]
                                        Export a report
-  intelligence scan [--category <c>]   List analyzer findings from the latest run
+  intelligence scan [--category <c>]   Run intelligence analyzers, list findings
                                        (reachability|cycles|duplication|hotspots|architecture)
+  intelligence cycles                  Detect circular dependencies in the import graph
 
 Options (all commands):
   --repo <path>    Target repository (default: cwd)

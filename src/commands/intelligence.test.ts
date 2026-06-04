@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { FindingsStore } from '../services/findings'
-import runIntelligence from './intelligence'
+import runIntelligence, { runAnalyzers } from './intelligence'
 
 const tempDirs: string[] = []
 
@@ -47,6 +47,90 @@ function makeIndexedRepo(name: string): { ctx: CliContext; dbPath: string } {
   return { ctx, dbPath }
 }
 
+// code-spider-q6b
+function seedImportCycle(dbPath: string): void {
+  const db = openDb(dbPath)
+  db.query(
+    `INSERT INTO nodes (id, run_id, kind, key, label, path) VALUES
+       (10, 1, 'unit', 'unit:src/a.ts', 'a.ts', 'src/a.ts'),
+       (11, 1, 'unit', 'unit:src/b.ts', 'b.ts', 'src/b.ts')`
+  ).run()
+  db.query(
+    `INSERT INTO edges (run_id, from_node_id, to_node_id, kind) VALUES (1, 10, 11, 'imports'), (1, 11, 10, 'imports')`
+  ).run()
+  db.close()
+}
+
+describe('intelligence cycles', () => {
+  test('detects and lists cycle findings from import edges', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-cycles')
+    seedImportCycle(dbPath)
+    ctx.json = true
+    ctx.args = ['cycles']
+    const logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const out = JSON.parse(logs.lines.join('\n')) as {
+      findings: Array<{ ruleId: string; locations: Array<{ path: string }> }>
+    }
+    expect(out.findings).toHaveLength(1)
+    expect(out.findings[0]!.ruleId).toBe('circular-dependency')
+    expect(out.findings[0]!.locations.map(l => l.path)).toEqual(['src/a.ts', 'src/b.ts'])
+  })
+
+  test('scan refreshes cycle findings before listing', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-scan-refresh')
+    seedImportCycle(dbPath)
+    ctx.json = true
+    ctx.args = ['scan']
+    const logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const out = JSON.parse(logs.lines.join('\n')) as { summary: { byCategory: Record<string, number> } }
+    expect(out.summary.byCategory['cycles']).toBe(1)
+  })
+})
+
+describe('analyzer fail-soft', () => {
+  test('a crashing analyzer warns and later analyzers still run', () => {
+    const { dbPath } = makeIndexedRepo('intel-failsoft')
+    const db = openDb(dbPath)
+    const ran: string[] = []
+    const errors: string[] = []
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(a => String(a)).join(' '))
+    }
+    let threw = false
+    try {
+      runAnalyzers(db, 1, undefined, [
+        {
+          name: 'cycles',
+          category: 'cycles',
+          run: () => {
+            throw new Error('synthetic crash')
+          },
+        },
+        { name: 'after', category: 'reachability', run: () => void ran.push('after') },
+      ])
+    } catch {
+      threw = true
+    } finally {
+      console.error = originalError
+      db.close()
+    }
+    expect(threw).toBe(false)
+    expect(errors.join('\n')).toContain('cycles analyzer failed: synthetic crash')
+    expect(ran).toEqual(['after'])
+  })
+})
+
 describe('intelligence scan', () => {
   test('emits empty findings summary as json on a clean run', async () => {
     const { ctx } = makeIndexedRepo('intel-empty')
@@ -68,22 +152,11 @@ describe('intelligence scan', () => {
     expect(out.findings).toEqual([])
   })
 
-  test('lists seeded findings in json output with fingerprints', async () => {
+  // code-spider-q6b: scan recomputes analyzer-backed categories, so these
+  // seed real import edges rather than hand-written findings rows.
+  test('lists computed findings in json output with fingerprints', async () => {
     const { ctx, dbPath } = makeIndexedRepo('intel-seeded')
-    const db = openDb(dbPath)
-    const store = new FindingsStore(db, 1)
-    store.add({
-      ruleId: 'circular-dependency',
-      category: 'cycles',
-      severity: 'warning',
-      confidence: 'high',
-      title: 'Cycle between a and b',
-      summary: 'a.ts and b.ts import each other',
-      anchor: 'unit:a.ts<->unit:b.ts',
-      nodeKey: 'unit:a.ts',
-      locations: [{ path: 'a.ts', line: 1 }],
-    })
-    db.close()
+    seedImportCycle(dbPath)
 
     ctx.json = true
     ctx.args = ['scan']
@@ -105,18 +178,7 @@ describe('intelligence scan', () => {
 
   test('renders human-readable table with severity and location', async () => {
     const { ctx, dbPath } = makeIndexedRepo('intel-table')
-    const db = openDb(dbPath)
-    new FindingsStore(db, 1).add({
-      ruleId: 'circular-dependency',
-      category: 'cycles',
-      severity: 'warning',
-      confidence: 'high',
-      title: 'Cycle between a and b',
-      summary: 'a.ts and b.ts import each other',
-      anchor: 'unit:a.ts<->unit:b.ts',
-      locations: [{ path: 'a.ts', line: 1 }],
-    })
-    db.close()
+    seedImportCycle(dbPath)
 
     ctx.args = ['scan']
     const logs = captureLogs()
@@ -128,7 +190,7 @@ describe('intelligence scan', () => {
     const text = logs.lines.join('\n')
     expect(text).toContain('circular-dependency')
     expect(text).toContain('warning')
-    expect(text).toContain('a.ts:1')
+    expect(text).toContain('src/a.ts')
   })
 
   test('scan --category filters findings', async () => {

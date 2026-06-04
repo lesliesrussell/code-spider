@@ -8,18 +8,46 @@ import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { FindingsStore } from '../services/findings'
 import type { Finding, FindingCategory, FindingFilter } from '../services/findings'
+// code-spider-q6b
+import { CycleAnalyzer } from '../services/cycles'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
 Subcommands:
-  scan [--category <c>]   List findings from the latest indexed run
-                          (categories: reachability|cycles|duplication|hotspots|architecture)`
+  scan [--category <c>]   Run all intelligence analyzers and list findings
+                          (categories: reachability|cycles|duplication|hotspots|architecture)
+  cycles                  Detect circular dependencies in the import graph`
 
 const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture']
 
+// code-spider-q6b
+// Analyzers run fail-soft: one crashing records a warning and the rest of
+// the scan proceeds — never poison the session.
+export type IntelAnalyzer = { name: string; category: FindingCategory; run: (db: ReturnType<typeof openDb>, runId: number) => void }
+
+const ANALYZERS: IntelAnalyzer[] = [
+  { name: 'cycles', category: 'cycles', run: (db, runId) => void new CycleAnalyzer().analyze(db, runId) },
+]
+
+export function runAnalyzers(
+  db: ReturnType<typeof openDb>,
+  runId: number,
+  only?: FindingCategory,
+  analyzers: IntelAnalyzer[] = ANALYZERS
+): void {
+  for (const analyzer of analyzers) {
+    if (only !== undefined && analyzer.category !== only) continue
+    try {
+      analyzer.run(db, runId)
+    } catch (err) {
+      console.error(`warning: ${analyzer.name} analyzer failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+}
+
 export default async function run(ctx: CliContext): Promise<void> {
   const sub = ctx.args[0]
-  if (sub !== 'scan') {
+  if (sub !== 'scan' && sub !== 'cycles') {
     console.error(INTEL_USAGE)
     process.exit(1)
   }
@@ -41,6 +69,9 @@ export default async function run(ctx: CliContext): Promise<void> {
     }
     filter.category = category
   }
+  // code-spider-q6b
+  if (sub === 'cycles') filter.category = 'cycles'
+  runAnalyzers(db, runId, filter.category)
 
   const findings = new FindingsStore(db, runId).list(filter)
   const byCategory: Record<string, number> = {}
