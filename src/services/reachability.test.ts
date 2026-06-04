@@ -185,3 +185,25 @@ describe('ReachabilityAnalyzer', () => {
     expect(second.map(f => f.fingerprint)).toEqual(first.map(f => f.fingerprint))
   })
 })
+
+// code-spider-hma
+describe('inferred entrypoints', () => {
+  test('inferred roots keep their imports alive and are never flagged themselves', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'reachability-inferred-'))
+    tempDirs.push(dir)
+    const db = openDb(join(dir, 'index.db'))
+    db.query("INSERT INTO runs (id, started_at, repo_root) VALUES (1, 't', '/repo')").run()
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, metadata_json) VALUES
+         (1, 1, 'unit', 'unit:src/index.ts', 'index.ts', 'src/index.ts', 'TypeScript', '{"entrypoint":true}'),
+         (2, 1, 'unit', 'unit:src/cli.ts', 'cli.ts', 'src/cli.ts', 'TypeScript', '{"entrypoint":"inferred","entrypointReason":"shebang CLI"}'),
+         (3, 1, 'unit', 'unit:src/cli-helper.ts', 'cli-helper.ts', 'src/cli-helper.ts', 'TypeScript', NULL)`
+    ).run()
+    db.query(
+      `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, confidence) VALUES (1, 2, 3, 'imports', 1)`
+    ).run()
+    const result = new ReachabilityAnalyzer().analyze(db, 1)
+    expect(result.roots).toBe(2)
+    expect(unusedFindings(db)).toEqual([])
+  })
+})

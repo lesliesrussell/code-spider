@@ -108,3 +108,57 @@ describe('Indexer entrypoint marking', () => {
     expect(out.node.entrypoint).toBe(1)
   })
 })
+
+// code-spider-hma
+describe('inferEntrypoints', () => {
+  test('package.json bin and main entries are inferred', async () => {
+    const root = makeRepo({
+      'package.json': JSON.stringify({ name: 'x', bin: { mycli: './src/cli.ts' }, main: 'src/lib.ts' }),
+      'src/cli.ts': 'export {}',
+      'src/lib.ts': 'export {}',
+      'src/other.ts': 'export {}',
+    })
+    const { inferEntrypoints } = await import('./entrypoints')
+    const inferred = await inferEntrypoints(root, ['src/cli.ts', 'src/lib.ts', 'src/other.ts'])
+    expect(inferred.get('src/cli.ts')).toContain('bin')
+    expect(inferred.get('src/lib.ts')).toContain('main')
+    expect(inferred.has('src/other.ts')).toBe(false)
+  })
+
+  test('shebang files and route-convention files are inferred', async () => {
+    const root = makeRepo({
+      'tools/run.ts': '#!/usr/bin/env bun\nexport {}',
+      'src/api/routes.ts': 'export {}',
+      'src/app/page.tsx': 'export {}',
+      'src/plain.ts': 'export {}',
+    })
+    const { inferEntrypoints } = await import('./entrypoints')
+    const inferred = await inferEntrypoints(root, ['tools/run.ts', 'src/api/routes.ts', 'src/app/page.tsx', 'src/plain.ts'])
+    expect(inferred.get('tools/run.ts')).toContain('shebang')
+    expect(inferred.get('src/api/routes.ts')).toContain('route')
+    expect(inferred.get('src/app/page.tsx')).toContain('route')
+    expect(inferred.has('src/plain.ts')).toBe(false)
+  })
+})
+
+// code-spider-hma
+describe('Indexer inferred entrypoints', () => {
+  test('inferred units carry entrypoint "inferred"; explicit config wins', async () => {
+    const root = makeRepo({
+      '.code-spider/config.yaml': 'intelligence:\n  entrypoints:\n    - src/index.ts\n',
+      'package.json': JSON.stringify({ name: 'x', bin: { a: './src/index.ts', b: './src/worker.ts' } }),
+      'src/index.ts': 'export {}',
+      'src/worker.ts': 'export {}',
+    })
+    const dbPath = join(root, '.code-spider', 'index.db')
+    await new Indexer().run({ repoRoot: root, dbPath })
+    const db = openDb(dbPath)
+    const rows = db
+      .query(`SELECT path, json_extract(metadata_json, '$.entrypoint') AS ep FROM nodes WHERE kind='unit' ORDER BY path`)
+      .all() as Array<{ path: string; ep: number | string | null }>
+    db.close()
+    const byPath = new Map(rows.map(r => [r.path, r.ep]))
+    expect(byPath.get('src/index.ts')).toBe(1) // explicit config beats inference
+    expect(byPath.get('src/worker.ts')).toBe('inferred')
+  })
+})

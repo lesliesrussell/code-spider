@@ -26,7 +26,8 @@ interface UnitRow {
   id: number
   path: string
   language: string | null
-  entrypoint: number | null
+  // 1 = explicit config glob; 'inferred' = convention inference (code-spider-hma)
+  entrypoint: number | string | null
 }
 
 export class ReachabilityAnalyzer {
@@ -55,8 +56,11 @@ export class ReachabilityAnalyzer {
       list.push({ to: e.t, confidence: e.c })
     }
 
-    const roots = inScope.filter(u => u.entrypoint === 1)
-    const implicitRoots = inScope.filter(u => u.entrypoint !== 1 && TEST_PATH.test(u.path))
+    // code-spider-hma: inferred entrypoints are roots too — conservative, so
+    // convention-wired files never false-positive as unused.
+    const isRoot = (u: UnitRow): boolean => u.entrypoint === 1 || u.entrypoint === 'inferred'
+    const roots = inScope.filter(isRoot)
+    const implicitRoots = inScope.filter(u => !isRoot(u) && TEST_PATH.test(u.path))
 
     purgeFindings(db, runId, { ruleId: 'unused-file' })
 
@@ -96,7 +100,7 @@ export class ReachabilityAnalyzer {
     const store = new FindingsStore(db, runId)
     let count = 0
     for (const unit of [...inScope].sort((a, b) => a.path.localeCompare(b.path))) {
-      if (unit.entrypoint === 1 || TEST_PATH.test(unit.path) || EXEMPT_PATH.test(unit.path)) continue
+      if (isRoot(unit) || TEST_PATH.test(unit.path) || EXEMPT_PATH.test(unit.path)) continue
       const reach = best.get(unit.id)
       if (reach !== undefined && reach >= 1) continue
       const weak = reach !== undefined

@@ -12,6 +12,8 @@ import { MarkdownContextIndexer } from './markdown-context'
 import { scanUnitImports } from './import-edges'
 // code-spider-0fy
 import { loadEntrypointGlobs, isEntrypoint } from './entrypoints'
+// code-spider-hma
+import { inferEntrypoints } from './entrypoints'
 
 export interface IndexOptions {
   repoRoot: string
@@ -210,6 +212,9 @@ export class Indexer {
 
     // code-spider-0fy
     const entrypointGlobs = loadEntrypointGlobs(repoRoot)
+    // code-spider-hma: convention inference supplements explicit globs;
+    // explicit always wins.
+    const inferredEntrypoints = await inferEntrypoints(repoRoot, files.map(f => f.relPath))
 
     // Insert unit nodes
     for (let i = 0; i < files.length; i++) {
@@ -232,7 +237,12 @@ export class Indexer {
         JSON.stringify({
           sizeBytes: file.sizeBytes,
           mtimeMs: file.mtimeMs,
-          ...(isEntrypoint(entrypointGlobs, file.relPath) ? { entrypoint: true } : {}),
+          // code-spider-hma
+          ...(isEntrypoint(entrypointGlobs, file.relPath)
+            ? { entrypoint: true }
+            : inferredEntrypoints.has(file.relPath)
+              ? { entrypoint: 'inferred', entrypointReason: inferredEntrypoints.get(file.relPath) }
+              : {}),
         }),
       )
 
