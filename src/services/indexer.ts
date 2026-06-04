@@ -8,6 +8,8 @@ import { BeadsContextIndexer } from './beads-context'
 // code-spider-ofm
 import { loadDefaultAnalyzerRegistrySafe, registryExtensionLanguages } from '../analyzer-registry-loader'
 import { MarkdownContextIndexer } from './markdown-context'
+// code-spider-89w
+import { scanUnitImports } from './import-edges'
 
 export interface IndexOptions {
   repoRoot: string
@@ -19,6 +21,8 @@ export interface IndexResult {
   fileCount: number
   zoneCount: number
   durationMs: number
+  // code-spider-89w
+  importEdgesAdded: number
   beads?: {
     issuesAdded: number
     dependencyEdgesAdded: number
@@ -317,6 +321,23 @@ export class Indexer {
       cochangeEdgesAdded++
     }
 
+    // code-spider-89w
+    // 10.5. Extract unit-level import edges — the substrate for cycle
+    // detection, reachability, and architecture rules. Confidence rides the
+    // new edges.confidence column (dynamic imports < 1).
+    let importEdgesAdded = 0
+    const insertImportEdge = db.prepare(
+      `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, weight, confidence, metadata_json)
+       VALUES (?,?,?,'imports',1,?,NULL)`
+    )
+    for (const record of await scanUnitImports(repoRoot, [...fileNodeIds.keys()])) {
+      const fromNodeId = fileNodeIds.get(record.fromPath)
+      const toNodeId = fileNodeIds.get(record.toPath)
+      if (fromNodeId === undefined || toNodeId === undefined) continue
+      insertImportEdge.run(runId, fromNodeId, toNodeId, record.confidence)
+      importEdgesAdded++
+    }
+
     // 11. Index markdown context
     const markdown = new MarkdownContextIndexer().run(db, runId, repoRoot)
 
@@ -356,6 +377,8 @@ export class Indexer {
         evidenceAdded: gitEvidenceAdded,
         cochangeEdgesAdded,
       },
+      // code-spider-89w
+      importEdgesAdded,
       markdown,
     }
   }
