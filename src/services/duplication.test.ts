@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { openDb } from '../db/init'
-import { tokenize, DuplicationAnalyzer } from './duplication'
+import { tokenize, DuplicationAnalyzer, loadDuplicationOptions } from './duplication'
 import { FindingsStore } from './findings'
 
 const tempDirs: string[] = []
@@ -147,5 +147,85 @@ describe('DuplicationAnalyzer', () => {
     ).run()
     await new DuplicationAnalyzer().analyze(db, 1)
     expect(dupes(db, 'duplicate-file')).toHaveLength(1)
+  })
+})
+
+// code-spider-5jd
+describe('normalized mode', () => {
+  test('blocks differing only in literals match in normalized mode, not strict', async () => {
+    // Same shape, different string/number literals.
+    const blockA = Array.from({ length: 12 }, (_, i) => `const s${i} = 'alpha${i}' + ${i * 7}`).join('\n')
+    const blockB = Array.from({ length: 12 }, (_, i) => `const s${i} = 'omega${i}' + ${i * 13}`).join('\n')
+    const make = () =>
+      seedRepo({
+        'src/a.ts': `${lines('a', 5)}\n${blockA}`,
+        'src/b.ts': `${lines('b', 5)}\n${blockB}`,
+      })
+
+    const strict = make()
+    await new DuplicationAnalyzer().analyze(strict.db, 1, { minTokens: 40, mode: 'strict' })
+    expect(dupes(strict.db, 'duplicate-region')).toEqual([])
+
+    const normalized = make()
+    await new DuplicationAnalyzer().analyze(normalized.db, 1, { minTokens: 40, mode: 'normalized' })
+    const regions = dupes(normalized.db, 'duplicate-region')
+    expect(regions).toHaveLength(1)
+    expect(regions[0]!.confidence).toBe('medium')
+  })
+
+  test('identifier changes still split matches in normalized mode', async () => {
+    const blockA = Array.from({ length: 12 }, (_, i) => `const left${i} = ${i}`).join('\n')
+    const blockB = Array.from({ length: 12 }, (_, i) => `const right${i} = ${i}`).join('\n')
+    const { db } = seedRepo({
+      'src/a.ts': `${lines('a', 5)}\n${blockA}`,
+      'src/b.ts': `${lines('b', 5)}\n${blockB}`,
+    })
+    await new DuplicationAnalyzer().analyze(db, 1, { minTokens: 40, mode: 'normalized' })
+    expect(dupes(db, 'duplicate-region')).toEqual([])
+  })
+})
+
+// code-spider-5jd
+describe('clone classes', () => {
+  test('a block shared by three files becomes one clone-class, not pairwise regions', async () => {
+    const shared = lines('s', 12)
+    const { db } = seedRepo({
+      'src/a.ts': `${lines('a', 5)}\n${shared}`,
+      'src/b.ts': `${lines('b', 7)}\n${shared}`,
+      'src/c.ts': `${lines('c', 3)}\n${shared}`,
+    })
+    await new DuplicationAnalyzer().analyze(db, 1, { minTokens: 40 })
+    const classes = dupes(db, 'clone-class')
+    expect(classes).toHaveLength(1)
+    expect(classes[0]!.locations.map(l => l.path).sort()).toEqual(['src/a.ts', 'src/b.ts', 'src/c.ts'])
+    expect(classes[0]!.metrics?.['files']).toBe(3)
+    expect(dupes(db, 'duplicate-region')).toEqual([])
+  })
+
+  test('a clone spanning zones is reported as cross-package-duplication', async () => {
+    const shared = lines('s', 12)
+    const { db } = seedRepo({
+      'backend/a.ts': `${lines('a', 5)}\n${shared}`,
+      'frontend/b.ts': `${lines('b', 7)}\n${shared}`,
+    })
+    await new DuplicationAnalyzer().analyze(db, 1, { minTokens: 40 })
+    const cross = dupes(db, 'cross-package-duplication')
+    expect(cross).toHaveLength(1)
+    expect(cross[0]!.metrics?.['zones']).toBe(2)
+    expect(dupes(db, 'duplicate-region')).toEqual([])
+  })
+})
+
+// code-spider-5jd
+describe('mode config', () => {
+  test('loadDuplicationOptions reads mode and min-tokens', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dup-config-'))
+    tempDirs.push(root)
+    mkdirSync(join(root, '.code-spider'), { recursive: true })
+    writeFileSync(
+      join(root, '.code-spider', 'config.yaml'),
+      'intelligence:\n  duplication:\n    mode: normalized\n    min-tokens: 25\n'
+    )
+    expect(loadDuplicationOptions(root)).toEqual({ minTokens: 25, mode: 'normalized' })
   })
 })

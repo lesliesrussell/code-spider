@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import type { Database } from 'bun:sqlite'
 import { FindingsStore, purgeFindings } from './findings'
-import { computeFingerprint } from './findings'
 import { debugLog } from '../utils/debug'
 
 export interface Token {
@@ -75,8 +74,14 @@ export function tokenize(source: string): Token[] {
   return tokens
 }
 
+export type DuplicationMode = 'strict' | 'normalized'
+
 export interface DuplicationOptions {
   minTokens?: number
+  // strict: exact token text. normalized: string/number literals collapse to
+  // placeholders, so literal-only differences still match. Identifier
+  // normalization (semantic-lite) is out of scope for now.
+  mode?: DuplicationMode
 }
 
 const DEFAULT_MIN_TOKENS = 40
@@ -87,10 +92,14 @@ export function loadDuplicationOptions(repoRoot: string): DuplicationOptions {
   try {
     const configPath = join(repoRoot, '.code-spider', 'config.yaml')
     const parsed = Bun.YAML.parse(readFileSync(configPath, 'utf8')) as {
-      intelligence?: { duplication?: { 'min-tokens'?: unknown } }
+      intelligence?: { duplication?: { 'min-tokens'?: unknown; mode?: unknown } }
     } | null
     const minTokens = parsed?.intelligence?.duplication?.['min-tokens']
-    return typeof minTokens === 'number' && minTokens > 0 ? { minTokens } : {}
+    const mode = parsed?.intelligence?.duplication?.['mode']
+    const options: DuplicationOptions = {}
+    if (typeof minTokens === 'number' && minTokens > 0) options.minTokens = minTokens
+    if (mode === 'strict' || mode === 'normalized') options.mode = mode
+    return options
   } catch {
     return {}
   }
@@ -99,6 +108,17 @@ export function loadDuplicationOptions(repoRoot: string): DuplicationOptions {
 interface FileTokens {
   path: string
   tokens: Token[]
+  // Parallel to tokens: the text used for hashing under the active mode.
+  hashTexts: string[]
+}
+
+// code-spider-5jd
+function hashText(token: Token, mode: DuplicationMode): string {
+  if (mode === 'strict') return token.text
+  const first = token.text[0]!
+  if (first === "'" || first === '"' || first === '`') return '\u0001str'
+  if (first >= '0' && first <= '9') return '\u0001num'
+  return token.text
 }
 
 interface Region {
@@ -113,6 +133,7 @@ interface Region {
 export class DuplicationAnalyzer {
   async analyze(db: Database, runId: number, options: DuplicationOptions = {}): Promise<{ findings: number }> {
     const minTokens = options.minTokens ?? DEFAULT_MIN_TOKENS
+    const mode = options.mode ?? 'strict'
     const run = db.query('SELECT repo_root FROM runs WHERE id = ?').get(runId) as { repo_root: string } | null
     if (run === null) return { findings: 0 }
 
@@ -129,7 +150,8 @@ export class DuplicationAnalyzer {
     for (const unit of units) {
       try {
         const source = await Bun.file(join(run.repo_root, unit.path)).text()
-        files.push({ path: unit.path, tokens: tokenize(source) })
+        const tokens = tokenize(source)
+        files.push({ path: unit.path, tokens, hashTexts: tokens.map(t => hashText(t, mode)) })
       } catch (err) {
         // Fail soft per file: unreadable units contribute nothing.
         debugLog('duplication', `tokenize failed for ${unit.path}`, err)
@@ -145,7 +167,7 @@ export class DuplicationAnalyzer {
     const wholeFileGroups = new Map<string, FileTokens[]>()
     for (const file of files) {
       if (file.tokens.length === 0) continue
-      const hash = String(Bun.hash(file.tokens.map(t => t.text).join('\u0000')))
+      const hash = String(Bun.hash(file.hashTexts.join('\u0000')))
       const group = wholeFileGroups.get(hash)
       if (group === undefined) wholeFileGroups.set(hash, [file])
       else group.push(file)
@@ -159,9 +181,9 @@ export class DuplicationAnalyzer {
         ruleId: 'duplicate-file',
         category: 'duplication',
         severity: 'warning',
-        confidence: 'high',
-        title: `${paths.length} identical files`,
-        summary: `Token-identical files: ${paths.join(', ')}`,
+        confidence: mode === 'strict' ? 'high' : 'medium',
+        title: `${paths.length} ${mode === 'strict' ? 'identical' : 'structurally identical'} files`,
+        summary: `${mode === 'strict' ? 'Token-identical' : 'Structurally identical (literals normalized)'} files: ${paths.join(', ')}`,
         anchor: paths.join('|'),
         nodeKey: `unit:${paths[0]!}`,
         locations: paths.map(p => ({ path: p })),
@@ -172,31 +194,65 @@ export class DuplicationAnalyzer {
     }
 
     const regionFiles = files.filter(f => !inWholeFileDup.has(f.path) && f.tokens.length >= minTokens)
+    const byPath = new Map(regionFiles.map(f => [f.path, f]))
+
+    // code-spider-5jd
+    // Pairwise regions group into clone classes by normalized content:
+    // every distinct (path, start) occurrence of the same content is one
+    // member. Rule precedence: spans zones -> cross-package-duplication;
+    // 3+ files -> clone-class; else duplicate-region.
+    interface Occurrence {
+      path: string
+      line: number
+    }
+    const classes = new Map<string, { occurrences: Map<string, Occurrence>; tokens: number; lines: number }>()
     for (const region of findRegions(regionFiles, minTokens)) {
-      const fileA = regionFiles.find(f => f.path === region.pathA)!
-      const fileB = regionFiles.find(f => f.path === region.pathB)!
+      const fileA = byPath.get(region.pathA)!
+      const fileB = byPath.get(region.pathB)!
+      const content = fileA.hashTexts.slice(region.startA, region.startA + region.length).join('\u0000')
+      const contentHash = String(Bun.hash(content))
+      let entry = classes.get(contentHash)
+      if (entry === undefined) {
+        entry = { occurrences: new Map(), tokens: 0, lines: 0 }
+        classes.set(contentHash, entry)
+      }
       const startLineA = fileA.tokens[region.startA]!.line
       const endLineA = fileA.tokens[region.startA + region.length - 1]!.line
       const startLineB = fileB.tokens[region.startB]!.line
-      const contentHash = computeFingerprint(
-        'duplicate-region',
-        region.pathA,
-        fileA.tokens.slice(region.startA, region.startA + region.length).map(t => t.text).join(' ')
+      entry.occurrences.set(`${region.pathA}:${region.startA}`, { path: region.pathA, line: startLineA })
+      entry.occurrences.set(`${region.pathB}:${region.startB}`, { path: region.pathB, line: startLineB })
+      entry.tokens = Math.max(entry.tokens, region.length)
+      entry.lines = Math.max(entry.lines, endLineA - startLineA + 1)
+    }
+
+    const confidence = mode === 'strict' ? 'high' : 'medium'
+    const sortedClasses = [...classes.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    for (const [contentHash, entry] of sortedClasses) {
+      const locations = [...entry.occurrences.values()].sort(
+        (a, b) => a.path.localeCompare(b.path) || a.line - b.line
       )
+      const paths = [...new Set(locations.map(l => l.path))].sort()
+      const zones = [...new Set(paths.map(p => p.split('/')[0]!))]
+      const ruleId =
+        zones.length >= 2 ? 'cross-package-duplication' : paths.length >= 3 ? 'clone-class' : 'duplicate-region'
       store.add({
-        ruleId: 'duplicate-region',
+        ruleId,
         category: 'duplication',
         severity: 'warning',
-        confidence: 'high',
-        title: `Duplicated region: ${region.pathA} and ${region.pathB}`,
-        summary: `${region.length} identical tokens shared by ${region.pathA}:${startLineA} and ${region.pathB}:${startLineB}`,
-        anchor: `${region.pathA}|${region.pathB}|${contentHash}`,
-        nodeKey: `unit:${region.pathA}`,
-        locations: [
-          { path: region.pathA, line: startLineA },
-          { path: region.pathB, line: startLineB },
-        ],
-        metrics: { tokens: region.length, lines: endLineA - startLineA + 1 },
+        confidence,
+        title:
+          ruleId === 'cross-package-duplication'
+            ? `Cross-package duplication across ${zones.length} zones`
+            : ruleId === 'clone-class'
+              ? `Clone class across ${paths.length} files`
+              : `Duplicated region: ${paths.join(' and ')}`,
+        summary: `${entry.tokens} matching tokens (${mode} mode) in ${locations
+          .map(l => `${l.path}:${l.line}`)
+          .join(', ')}`,
+        anchor: `${paths.join('|')}|${contentHash}`,
+        nodeKey: `unit:${paths[0]!}`,
+        locations,
+        metrics: { tokens: entry.tokens, lines: entry.lines, files: paths.length, zones: zones.length },
         tags: ['duplication'],
       })
       count++
@@ -214,14 +270,7 @@ function findRegions(files: FileTokens[], minTokens: number): Region[] {
   for (let fi = 0; fi < files.length; fi++) {
     const tokens = files[fi]!.tokens
     for (let start = 0; start + minTokens <= tokens.length; start++) {
-      const hash = String(
-        Bun.hash(
-          tokens
-            .slice(start, start + minTokens)
-            .map(t => t.text)
-            .join('\u0000')
-        )
-      )
+      const hash = String(Bun.hash(files[fi]!.hashTexts.slice(start, start + minTokens).join('\u0000')))
       const hits = windowHits.get(hash)
       if (hits === undefined) windowHits.set(hash, [{ file: fi, start }])
       else hits.push({ file: fi, start })
