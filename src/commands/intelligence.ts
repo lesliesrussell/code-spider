@@ -14,6 +14,8 @@ import { CycleAnalyzer } from '../services/cycles'
 import { ReachabilityAnalyzer } from '../services/reachability'
 // code-spider-c4l
 import { loadSuppressions, applySuppressions } from '../services/suppressions'
+// code-spider-9kx
+import { DuplicationAnalyzer, loadDuplicationOptions } from '../services/duplication'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
@@ -21,14 +23,19 @@ Subcommands:
   scan [--category <c>]   Run all intelligence analyzers and list findings
                           (categories: reachability|cycles|duplication|hotspots|architecture)
   cycles                  Detect circular dependencies in the import graph
-  unused                  Find files unreachable from configured entrypoints`
+  unused                  Find files unreachable from configured entrypoints
+  dupes                   Detect duplicated files and regions (strict token match)`
 
 const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions']
 
 // code-spider-q6b
 // Analyzers run fail-soft: one crashing records a warning and the rest of
 // the scan proceeds — never poison the session.
-export type IntelAnalyzer = { name: string; category: FindingCategory; run: (db: ReturnType<typeof openDb>, runId: number) => void }
+export type IntelAnalyzer = {
+  name: string
+  category: FindingCategory
+  run: (db: ReturnType<typeof openDb>, runId: number, repoRoot: string) => void | Promise<void>
+}
 
 const ANALYZERS: IntelAnalyzer[] = [
   { name: 'cycles', category: 'cycles', run: (db, runId) => void new CycleAnalyzer().analyze(db, runId) },
@@ -45,18 +52,26 @@ const ANALYZERS: IntelAnalyzer[] = [
       }
     },
   },
+  // code-spider-9kx
+  {
+    name: 'duplication',
+    category: 'duplication',
+    run: async (db, runId, repoRoot) =>
+      void (await new DuplicationAnalyzer().analyze(db, runId, loadDuplicationOptions(repoRoot))),
+  },
 ]
 
-export function runAnalyzers(
+export async function runAnalyzers(
   db: ReturnType<typeof openDb>,
   runId: number,
+  repoRoot: string,
   only?: FindingCategory,
   analyzers: IntelAnalyzer[] = ANALYZERS
-): void {
+): Promise<void> {
   for (const analyzer of analyzers) {
     if (only !== undefined && analyzer.category !== only) continue
     try {
-      analyzer.run(db, runId)
+      await analyzer.run(db, runId, repoRoot)
     } catch (err) {
       console.error(`warning: ${analyzer.name} analyzer failed: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -65,7 +80,7 @@ export function runAnalyzers(
 
 export default async function run(ctx: CliContext): Promise<void> {
   const sub = ctx.args[0]
-  if (sub !== 'scan' && sub !== 'cycles' && sub !== 'unused') {
+  if (sub !== 'scan' && sub !== 'cycles' && sub !== 'unused' && sub !== 'dupes') {
     console.error(INTEL_USAGE)
     process.exit(1)
   }
@@ -91,7 +106,9 @@ export default async function run(ctx: CliContext): Promise<void> {
   if (sub === 'cycles') filter.category = 'cycles'
   // code-spider-cii
   if (sub === 'unused') filter.category = 'reachability'
-  runAnalyzers(db, runId, filter.category)
+  // code-spider-9kx
+  if (sub === 'dupes') filter.category = 'duplication'
+  await runAnalyzers(db, runId, ctx.repoRoot, filter.category)
   // code-spider-c4l
   // Suppressions evaluate against the fresh analyzer results; stale entries
   // become findings themselves.

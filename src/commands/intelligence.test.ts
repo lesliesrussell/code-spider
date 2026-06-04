@@ -197,7 +197,7 @@ describe('suppressions in scan', () => {
 })
 
 describe('analyzer fail-soft', () => {
-  test('a crashing analyzer warns and later analyzers still run', () => {
+  test('a crashing analyzer warns and later analyzers still run', async () => {
     const { dbPath } = makeIndexedRepo('intel-failsoft')
     const db = openDb(dbPath)
     const ran: string[] = []
@@ -208,7 +208,7 @@ describe('analyzer fail-soft', () => {
     }
     let threw = false
     try {
-      runAnalyzers(db, 1, undefined, [
+      await runAnalyzers(db, 1, '/repo', undefined, [
         {
           name: 'cycles',
           category: 'cycles',
