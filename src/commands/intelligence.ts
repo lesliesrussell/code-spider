@@ -26,11 +26,13 @@ import { ArchitectureAnalyzer, loadArchitectureOptions } from '../services/archi
 import { SymbolUnusedAnalyzer } from '../services/symbol-unused'
 // code-spider-773
 import { renderFindingsMarkdown } from '../services/findings-report'
+// code-spider-lif
+import { renderFindingsSarif } from '../services/findings-sarif'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
 Subcommands:
-  scan [--category <c>] [--format table|json|md]
+  scan [--category <c>] [--format table|json|md|sarif]
                           Run all intelligence analyzers and list findings
                           (categories: reachability|cycles|duplication|hotspots|architecture)
   cycles                  Detect circular dependencies in the import graph
@@ -179,12 +181,17 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   // code-spider-773
   const format = typeof ctx.flags['format'] === 'string' ? ctx.flags['format'] : undefined
-  if (format !== undefined && format !== 'table' && format !== 'json' && format !== 'md') {
-    console.error(`Unknown format: ${format} (expected table|json|md)`)
+  if (format !== undefined && !['table', 'json', 'md', 'sarif'].includes(format)) {
+    console.error(`Unknown format: ${format} (expected table|json|md|sarif)`)
     process.exit(1)
   }
   if (format === 'md') {
     console.log(renderFindingsMarkdown(runId, findings, id => store.getEvidence(id)))
+    return
+  }
+  // code-spider-lif
+  if (format === 'sarif') {
+    console.log(JSON.stringify(renderFindingsSarif(findings), null, 2))
     return
   }
 
