@@ -75,6 +75,40 @@ function scanTypeOnlyImports(source: string): string[] {
   return specifiers
 }
 
+// code-spider-ty9
+// Shared specifier extraction: shebang-tolerant, type-only-supplemented,
+// fail-soft. Returns every import specifier (relative AND bare) so both the
+// edge builder and the manifest analyzer read imports the same way.
+export async function scanFileSpecifiers(
+  repoRoot: string,
+  relPath: string
+): Promise<Array<{ path: string; kind: string }>> {
+  const loader = loaderFor(relPath)
+  if (loader === undefined) return []
+  try {
+    // code-spider-cii: the transpiler rejects shebang lines (CLI
+    // entrypoints have them), so blank the first line out while keeping
+    // line offsets intact.
+    let source = await Bun.file(join(repoRoot, relPath)).text()
+    if (source.startsWith('#!')) {
+      source = source.replace(/^#![^\n]*/, '')
+    }
+    const imports = new Bun.Transpiler({ loader }).scanImports(source)
+    // code-spider-cii: scanImports erases type-only imports (they don't
+    // survive transpilation), but for reachability a type-only-imported
+    // file is live. Supplement with a syntactic pass.
+    for (const specifier of scanTypeOnlyImports(source)) {
+      imports.push({ path: specifier, kind: 'import-statement' })
+    }
+    return imports
+  } catch (err) {
+    // Fail soft: a file the transpiler can't read or parse contributes no
+    // imports; it must not poison the rest of the scan.
+    debugLog('import-edges', `scan failed for ${relPath}`, err)
+    return []
+  }
+}
+
 export async function scanUnitImports(repoRoot: string, unitPaths: string[]): Promise<ImportRecord[]> {
   const units = new Set(unitPaths)
   // from\0to -> confidence; duplicates keep the strongest signal so a
@@ -83,30 +117,7 @@ export async function scanUnitImports(repoRoot: string, unitPaths: string[]): Pr
   const records = new Map<string, number>()
 
   for (const fromPath of [...unitPaths].sort()) {
-    const loader = loaderFor(fromPath)
-    if (loader === undefined) continue
-    let imports: Array<{ path: string; kind: string }>
-    try {
-      // code-spider-cii: the transpiler rejects shebang lines (CLI
-      // entrypoints have them), so blank the first line out while keeping
-      // line offsets intact.
-      let source = await Bun.file(join(repoRoot, fromPath)).text()
-      if (source.startsWith('#!')) {
-        source = source.replace(/^#![^\n]*/, '')
-      }
-      imports = new Bun.Transpiler({ loader }).scanImports(source)
-      // code-spider-cii: scanImports erases type-only imports (they don't
-      // survive transpilation), but for reachability a type-only-imported
-      // file is live. Supplement with a syntactic pass.
-      for (const specifier of scanTypeOnlyImports(source)) {
-        imports.push({ path: specifier, kind: 'import-statement' })
-      }
-    } catch (err) {
-      // Fail soft: a file the transpiler can't read or parse contributes no
-      // edges; it must not poison the rest of the scan.
-      debugLog('import-edges', `scan failed for ${fromPath}`, err)
-      continue
-    }
+    const imports = await scanFileSpecifiers(repoRoot, fromPath)
     for (const imp of imports) {
       const toPath = resolveSpecifier(fromPath, imp.path, units)
       if (toPath === undefined || toPath === fromPath) continue

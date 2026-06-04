@@ -18,6 +18,8 @@ import { loadSuppressions, applySuppressions } from '../services/suppressions'
 import { DuplicationAnalyzer, loadDuplicationOptions } from '../services/duplication'
 // code-spider-p1d
 import { HotspotAnalyzer, loadHotspotOptions } from '../services/hotspots'
+// code-spider-ty9
+import { ManifestAnalyzer } from '../services/manifest'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
@@ -55,6 +57,12 @@ const ANALYZERS: IntelAnalyzer[] = [
         )
       }
     },
+  },
+  // code-spider-ty9
+  {
+    name: 'manifest',
+    category: 'reachability',
+    run: async (db, runId) => void (await new ManifestAnalyzer().analyze(db, runId)),
   },
   // code-spider-9kx
   {
