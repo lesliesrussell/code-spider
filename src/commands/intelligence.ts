@@ -22,6 +22,8 @@ import { HotspotAnalyzer, loadHotspotOptions } from '../services/hotspots'
 import { ManifestAnalyzer } from '../services/manifest'
 // code-spider-ek5
 import { ArchitectureAnalyzer, loadArchitectureOptions } from '../services/architecture'
+// code-spider-9cg
+import { SymbolUnusedAnalyzer } from '../services/symbol-unused'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
@@ -66,6 +68,12 @@ const ANALYZERS: IntelAnalyzer[] = [
     name: 'manifest',
     category: 'reachability',
     run: async (db, runId) => void (await new ManifestAnalyzer().analyze(db, runId)),
+  },
+  // code-spider-9cg
+  {
+    name: 'symbol-unused',
+    category: 'reachability',
+    run: (db, runId) => void new SymbolUnusedAnalyzer().analyze(db, runId),
   },
   // code-spider-9kx
   {

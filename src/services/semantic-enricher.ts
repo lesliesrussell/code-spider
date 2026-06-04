@@ -310,6 +310,11 @@ export class SemanticEnricher {
     const insertEdge = db.prepare(
       'INSERT INTO symbol_edges (run_id, from_symbol_id, to_symbol_id, kind, metadata_json) VALUES (?,?,?,?,?)'
     )
+    // code-spider-9cg
+    // The budget means most symbols are never queried; consumers (unused-
+    // export analysis) must distinguish "no references" from "never asked".
+    // refQuery.externalRefs counts non-declaration locations.
+    const updateMetadata = db.prepare('UPDATE symbols SET metadata_json = ? WHERE id = ?')
     const seen = new Set<string>()
     let added = 0
     let queries = 0
@@ -334,12 +339,21 @@ export class SemanticEnricher {
             target: path,
             position,
           })
+          // code-spider-9cg
+          let externalRefs = 0
           for (const location of refs.locations) {
             // Locations come back absolute; the symbol table is keyed by
             // repo-relative paths.
             const relPath = location.path.startsWith(`${repoRoot}/`)
               ? location.path.slice(repoRoot.length + 1)
               : location.path
+            // code-spider-9cg: the declaration itself (the queried position)
+            // is not a use.
+            const isDeclaration =
+              relPath === path &&
+              location.range.start.line === position.line &&
+              location.range.start.character === position.character
+            if (!isDeclaration) externalRefs++
             const candidates = byPath.get(relPath) ?? []
             let enclosing: (SymbolRow & { range: Range | null }) | undefined
             for (const candidate of candidates) {
@@ -354,6 +368,18 @@ export class SemanticEnricher {
             seen.add(key)
             insertEdge.run(runId, enclosing.id, target.id, 'references', JSON.stringify({ analyzer_id: refs.analyzerId }))
             added++
+          }
+          // code-spider-9cg: stamp the query outcome onto the symbol.
+          if (refs.analyzerId !== null) {
+            const row = db.query<{ metadata_json: string | null }, [number]>('SELECT metadata_json FROM symbols WHERE id = ?').get(target.id)
+            let metadata: Record<string, unknown> = {}
+            try {
+              metadata = row?.metadata_json !== null && row?.metadata_json !== undefined ? (JSON.parse(row.metadata_json) as Record<string, unknown>) : {}
+            } catch {
+              metadata = {}
+            }
+            metadata['refQuery'] = { externalRefs }
+            updateMetadata.run(JSON.stringify(metadata), target.id)
           }
         } catch (err) {
           debugLog('semantic-enricher', `reference resolution failed for ${path}:${target.name}`, err)
