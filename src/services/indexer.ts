@@ -14,6 +14,8 @@ import { scanUnitImports } from './import-edges'
 import { loadEntrypointGlobs, isEntrypoint } from './entrypoints'
 // code-spider-hma
 import { inferEntrypoints } from './entrypoints'
+// code-spider-sgm
+import { isTestPath, TEST_SUFFIX } from '../utils/test-paths'
 
 export interface IndexOptions {
   repoRoot: string
@@ -351,12 +353,46 @@ export class Indexer {
       `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, weight, confidence, metadata_json)
        VALUES (?,?,?,'imports',1,?,NULL)`
     )
-    for (const record of await scanUnitImports(repoRoot, [...fileNodeIds.keys()])) {
+    const importRecords = await scanUnitImports(repoRoot, [...fileNodeIds.keys()])
+    for (const record of importRecords) {
       const fromNodeId = fileNodeIds.get(record.fromPath)
       const toNodeId = fileNodeIds.get(record.toPath)
       if (fromNodeId === undefined || toNodeId === undefined) continue
       insertImportEdge.run(runId, fromNodeId, toNodeId, record.confidence)
       importEdgesAdded++
+    }
+
+    // code-spider-sgm
+    // 10.6. tested-by edges (subject -> test file). Import-derived links are
+    // certain; the co-located sibling convention is a fallback at 0.8.
+    const insertTestedByEdge = db.prepare(
+      `INSERT INTO edges (run_id, from_node_id, to_node_id, kind, weight, confidence, metadata_json)
+       VALUES (?,?,?,'tested-by',1,?,NULL)`
+    )
+    const testedByPairs = new Map<string, number>() // "subject\0test" -> confidence
+    for (const record of importRecords) {
+      if (!isTestPath(record.fromPath) || isTestPath(record.toPath)) continue
+      testedByPairs.set(`${record.toPath}\u0000${record.fromPath}`, 1)
+    }
+    for (const path of fileNodeIds.keys()) {
+      if (!TEST_SUFFIX.test(path)) continue
+      const base = path.replace(TEST_SUFFIX, '')
+      for (const ext of ['.ts', '.tsx', '.js', '.jsx']) {
+        const subject = `${base}${ext}`
+        if (!fileNodeIds.has(subject)) continue
+        const key = `${subject}\u0000${path}`
+        if (!testedByPairs.has(key)) testedByPairs.set(key, 0.8)
+        break
+      }
+    }
+    let testedByEdgesAdded = 0
+    for (const [pair, confidence] of [...testedByPairs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const [subject, testFile] = pair.split('\u0000') as [string, string]
+      const subjectId = fileNodeIds.get(subject)
+      const testId = fileNodeIds.get(testFile)
+      if (subjectId === undefined || testId === undefined) continue
+      insertTestedByEdge.run(runId, subjectId, testId, confidence)
+      testedByEdgesAdded++
     }
 
     // 11. Index markdown context

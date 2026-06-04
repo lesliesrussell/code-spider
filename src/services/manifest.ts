@@ -50,7 +50,21 @@ export class ManifestAnalyzer {
     let count = 0
 
     count += await this.unusedDependencies(run.repo_root, units, store)
-    count += this.orphanTests(units, unitSet, store)
+    // code-spider-sgm
+    // tested-by edges rescue: a test linked to any real unit is testing
+    // something that exists, whatever its filename says.
+    const testedByTargets = new Set(
+      (
+        db
+          .query(
+            `SELECT n2.path AS testPath FROM edges e
+             JOIN nodes n2 ON e.to_node_id = n2.id
+             WHERE e.run_id = ? AND e.kind = 'tested-by' AND n2.path IS NOT NULL`
+          )
+          .all(runId) as Array<{ testPath: string }>
+      ).map(r => r.testPath)
+    )
+    count += this.orphanTests(units, unitSet, testedByTargets, store)
     return { findings: count }
   }
 
@@ -101,10 +115,12 @@ export class ManifestAnalyzer {
     return count
   }
 
-  private orphanTests(units: string[], unitSet: Set<string>, store: FindingsStore): number {
+  private orphanTests(units: string[], unitSet: Set<string>, testedByTargets: Set<string>, store: FindingsStore): number {
     let count = 0
     for (const unit of units) {
       if (TEST_DIR.test(unit) || !TEST_SUFFIX.test(unit)) continue
+      // code-spider-sgm: edge-backed rescue beats the filename convention
+      if (testedByTargets.has(unit)) continue
       const base = unit.replace(TEST_SUFFIX, '')
       const subjectExists = SUBJECT_EXTENSIONS.some(ext => unitSet.has(`${base}${ext}`))
       if (subjectExists) continue
