@@ -169,3 +169,26 @@ describe('CycleAnalyzer', () => {
     expect(row?.status).toBe('success')
   })
 })
+
+// code-spider-l0m
+describe('cycle evidence', () => {
+  test('circular-dependency findings carry member import edges as evidence', () => {
+    const db = seedGraph(
+      [
+        { id: 1, path: 'src/a.ts' },
+        { id: 2, path: 'src/b.ts' },
+      ],
+      [[1, 2], [2, 1]]
+    )
+    new CycleAnalyzer().analyze(db, 1)
+    const store = new FindingsStore(db, 1)
+    const finding = store.list({ ruleId: 'circular-dependency' })[0]!
+    const evidence = store.getEvidence(finding.id)
+    expect(evidence.map(e => e.locator).sort()).toEqual([
+      'src/a.ts -> src/b.ts',
+      'src/b.ts -> src/a.ts',
+    ])
+    expect(evidence[0]!.kind).toBe('graph')
+    expect(evidence[0]!.source).toBe('imports')
+  })
+})

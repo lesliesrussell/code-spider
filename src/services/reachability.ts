@@ -10,7 +10,7 @@
 // reference data and live in a follow-up bead.
 // See docs/intelligence-suite-design.md.
 import type { Database } from 'bun:sqlite'
-import { FindingsStore } from './findings'
+import { FindingsStore, purgeFindings } from './findings'
 
 // Languages whose units participate in the import graph. Everything else
 // (docs, config) is out of scope for reachability and never flagged.
@@ -58,7 +58,7 @@ export class ReachabilityAnalyzer {
     const roots = inScope.filter(u => u.entrypoint === 1)
     const implicitRoots = inScope.filter(u => u.entrypoint !== 1 && TEST_PATH.test(u.path))
 
-    db.query(`DELETE FROM findings WHERE run_id = ? AND rule_id = 'unused-file'`).run(runId)
+    purgeFindings(db, runId, { ruleId: 'unused-file' })
 
     // No explicit entrypoints: reachability is undefined, not "everything is
     // dead". Degrade to zero findings.

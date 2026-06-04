@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
-import { FindingsStore } from './findings'
+import { FindingsStore, purgeFindings } from './findings'
 
 export interface HotspotWeights {
   complexity: number
@@ -118,7 +118,7 @@ export class HotspotAnalyzer {
     const weightSum =
       weights.complexity + weights.centrality + weights.churn + weights.duplication + weights.cycles
 
-    db.query(`DELETE FROM findings WHERE run_id = ? AND category = 'hotspots'`).run(runId)
+    purgeFindings(db, runId, { category: 'hotspots' })
     const store = new FindingsStore(db, runId)
     let count = 0
 

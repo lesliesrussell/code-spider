@@ -5,7 +5,7 @@
 // idempotently per run: same graph, same fingerprints. See
 // docs/intelligence-suite-design.md.
 import type { Database } from 'bun:sqlite'
-import { FindingsStore } from './findings'
+import { FindingsStore, purgeFindings } from './findings'
 import type { FindingInput } from './findings'
 
 // Iterative Tarjan. Returns only components with 2+ members (self-loops are
@@ -120,7 +120,7 @@ export class CycleAnalyzer {
       churnByNode.set(row.node_id, row.value)
     }
 
-    db.query(`DELETE FROM findings WHERE run_id = ? AND category = 'cycles'`).run(runId)
+    purgeFindings(db, runId, { category: 'cycles' })
     const store = new FindingsStore(db, runId)
     let count = 0
 
@@ -129,10 +129,20 @@ export class CycleAnalyzer {
       edges.map(e => [e.f, e.t])
     )
     for (const scc of unitSccs) {
+      const memberIds = new Set(scc)
       const members = scc.map(id => unitById.get(id)!).sort((a, b) => a.path.localeCompare(b.path))
       const paths = members.map(m => m.path)
       const totalChurn = scc.reduce((sum, id) => sum + (churnByNode.get(id) ?? 0), 0)
-      store.add(makeCycleFinding('circular-dependency', paths, { sccSize: scc.length, totalChurn }))
+      const finding = store.add(makeCycleFinding('circular-dependency', paths, { sccSize: scc.length, totalChurn }))
+      // code-spider-l0m: the cycle's own import edges are its evidence.
+      for (const edge of edges) {
+        if (!memberIds.has(edge.f) || !memberIds.has(edge.t)) continue
+        store.addEvidence(finding.id, {
+          kind: 'graph',
+          source: 'imports',
+          locator: `${unitById.get(edge.f)!.path} -> ${unitById.get(edge.t)!.path}`,
+        })
+      }
       count++
     }
 

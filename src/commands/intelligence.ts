@@ -27,7 +27,8 @@ Subcommands:
   cycles                  Detect circular dependencies in the import graph
   unused                  Find files unreachable from configured entrypoints
   dupes                   Detect duplicated files and regions (strict token match)
-  hotspots                Rank risk hotspots (complexity, centrality, churn, dupes, cycles)`
+  hotspots                Rank risk hotspots (complexity, centrality, churn, dupes, cycles)
+  explain <finding-id>    Show a finding with its supporting evidence`
 
 const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions']
 
@@ -91,7 +92,8 @@ export async function runAnalyzers(
 
 export default async function run(ctx: CliContext): Promise<void> {
   const sub = ctx.args[0]
-  if (sub !== 'scan' && sub !== 'cycles' && sub !== 'unused' && sub !== 'dupes' && sub !== 'hotspots') {
+  const SUBCOMMANDS = ['scan', 'cycles', 'unused', 'dupes', 'hotspots', 'explain']
+  if (sub === undefined || !SUBCOMMANDS.includes(sub)) {
     console.error(INTEL_USAGE)
     process.exit(1)
   }
@@ -101,6 +103,12 @@ export default async function run(ctx: CliContext): Promise<void> {
   if (runId === null) {
     console.error('No index found. Run: code-spider index')
     process.exit(1)
+  }
+
+  // code-spider-l0m
+  if (sub === 'explain') {
+    explainFinding(db, runId, ctx)
+    return
   }
 
   const filter: FindingFilter = {}
@@ -161,4 +169,45 @@ function formatLocation(f: Finding): string {
   const loc = f.locations[0]
   if (!loc) return f.nodeKey ?? ''
   return loc.line !== undefined ? `${loc.path}:${loc.line}` : loc.path
+}
+
+// code-spider-l0m
+function explainFinding(db: ReturnType<typeof openDb>, runId: number, ctx: CliContext): void {
+  const findingId = ctx.args[1]
+  if (findingId === undefined) {
+    console.error('Usage: code-spider intelligence explain <finding-id>')
+    process.exit(1)
+  }
+  const store = new FindingsStore(db, runId)
+  const finding = store.list().find(f => f.id === findingId)
+  if (finding === undefined) {
+    console.error(`No finding ${findingId} in run #${runId}. Run: code-spider intelligence scan`)
+    process.exit(1)
+  }
+  const evidence = store.getEvidence(finding.id)
+
+  if (ctx.json) {
+    console.log(JSON.stringify({ runId, finding, evidence }, null, 2))
+    return
+  }
+
+  console.log(`[${finding.severity}] ${finding.ruleId}  ${formatLocation(finding)}`)
+  console.log(`  ${finding.title}`)
+  console.log(`  ${finding.summary}`)
+  console.log(`  confidence: ${finding.confidence}  fingerprint: ${finding.fingerprint}`)
+  if (finding.metrics !== undefined) {
+    const metrics = Object.entries(finding.metrics)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('  ')
+    console.log(`  metrics: ${metrics}`)
+  }
+  console.log()
+  if (evidence.length === 0) {
+    console.log('  (no linked evidence; locations above are the support)')
+    return
+  }
+  console.log('Evidence')
+  for (const e of evidence) {
+    console.log(`  [${e.kind}/${e.source}] ${e.locator ?? ''}${e.snippet !== undefined ? `  ${e.snippet}` : ''}`)
+  }
 }

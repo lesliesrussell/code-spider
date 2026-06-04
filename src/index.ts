@@ -45,6 +45,9 @@ Commands:
                                        (reachability|cycles|duplication|hotspots|architecture)
   intelligence cycles                  Detect circular dependencies in the import graph
   intelligence unused                  Find files unreachable from configured entrypoints
+  intelligence dupes                   Detect duplicated files and regions
+  intelligence hotspots                Rank risk hotspots by weighted signals
+  intelligence explain <finding-id>    Show a finding with its supporting evidence
 
 Options (all commands):
   --repo <path>    Target repository (default: cwd)

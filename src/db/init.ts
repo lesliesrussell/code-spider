@@ -40,6 +40,11 @@ function migrateExistingTables(db: Database): void {
   if (!edgeCols.some(c => c.name === 'confidence')) {
     db.query('ALTER TABLE edges ADD COLUMN confidence REAL NOT NULL DEFAULT 1').run()
   }
+  // code-spider-l0m
+  const evidenceCols = db.query('PRAGMA table_info(evidence)').all() as Array<{ name: string }>
+  if (!evidenceCols.some(c => c.name === 'finding_id')) {
+    db.query('ALTER TABLE evidence ADD COLUMN finding_id TEXT').run()
+  }
 }
 
 export function openDb(dbPath: string): Database {

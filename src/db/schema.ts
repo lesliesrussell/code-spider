@@ -34,11 +34,14 @@ export const SCHEMA: string[] = [
   confidence REAL NOT NULL DEFAULT 1,
   metadata_json TEXT
 )`,
+  // code-spider-l0m: finding_id links evidence to intelligence findings
+  // (evidence-over-assertion for the analyzer suite).
   `CREATE TABLE IF NOT EXISTS evidence (
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES runs(id),
   node_id INTEGER REFERENCES nodes(id),
   edge_id INTEGER REFERENCES edges(id),
+  finding_id TEXT,
   kind TEXT NOT NULL,
   source TEXT NOT NULL,
   locator TEXT,

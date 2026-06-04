@@ -7,7 +7,7 @@
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import type { Database } from 'bun:sqlite'
-import { FindingsStore } from './findings'
+import { FindingsStore, purgeFindings } from './findings'
 import { computeFingerprint } from './findings'
 import { debugLog } from '../utils/debug'
 
@@ -136,7 +136,7 @@ export class DuplicationAnalyzer {
       }
     }
 
-    db.query(`DELETE FROM findings WHERE run_id = ? AND category = 'duplication'`).run(runId)
+    purgeFindings(db, runId, { category: 'duplication' })
     const store = new FindingsStore(db, runId)
     let count = 0
 

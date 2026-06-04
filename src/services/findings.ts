@@ -46,6 +46,17 @@ export interface FindingFilter {
   ruleId?: string
 }
 
+// code-spider-l0m
+// Evidence rows backing a finding — evidence-over-assertion: every claim the
+// analyzer suite makes can show its work. kind is open-ended ('graph' for
+// edge-derived evidence) since the column is unconstrained.
+export interface FindingEvidence {
+  kind: string
+  source: string
+  locator?: string
+  snippet?: string
+}
+
 // Fingerprint = rule + normalized node path + structural anchor. Line numbers
 // stay out so edits above a finding don't re-identify it. Backslashes
 // normalize so fingerprints match across platforms.
@@ -70,6 +81,35 @@ interface FindingRow {
   locations_json: string
   metrics_json: string | null
   tags_json: string | null
+}
+
+// code-spider-l0m
+// Analyzers recompute their findings each pass; linked evidence must go
+// with them or it orphans. Single deletion path for both tables.
+export function purgeFindings(
+  db: Database,
+  runId: number,
+  filter: { category?: FindingCategory; ruleId?: string; id?: string }
+): void {
+  const clauses = ['run_id = ?']
+  const params: Array<string | number> = [runId]
+  if (filter.category !== undefined) {
+    clauses.push('category = ?')
+    params.push(filter.category)
+  }
+  if (filter.ruleId !== undefined) {
+    clauses.push('rule_id = ?')
+    params.push(filter.ruleId)
+  }
+  if (filter.id !== undefined) {
+    clauses.push('id = ?')
+    params.push(filter.id)
+  }
+  const where = clauses.join(' AND ')
+  db.query(
+    `DELETE FROM evidence WHERE run_id = ? AND finding_id IN (SELECT id FROM findings WHERE ${where})`
+  ).run(runId, ...params)
+  db.query(`DELETE FROM findings WHERE ${where}`).run(...params)
 }
 
 export class FindingsStore {
@@ -121,6 +161,37 @@ export class FindingsStore {
       .query(`SELECT * FROM findings WHERE ${clauses.join(' AND ')} ORDER BY category, rule_id, id`)
       .all(...params) as FindingRow[]
     return rows.map(rowToFinding)
+  }
+
+  // code-spider-l0m
+  addEvidence(findingId: string, evidence: FindingEvidence): void {
+    this.db
+      .query(
+        `INSERT INTO evidence (run_id, finding_id, kind, source, locator, snippet)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(this.runId, findingId, evidence.kind, evidence.source, evidence.locator ?? null, evidence.snippet ?? null)
+  }
+
+  // code-spider-l0m
+  getEvidence(findingId: string): FindingEvidence[] {
+    const rows = this.db
+      .query(
+        `SELECT kind, source, locator, snippet FROM evidence
+         WHERE run_id = ? AND finding_id = ? ORDER BY id`
+      )
+      .all(this.runId, findingId) as Array<{
+      kind: string
+      source: string
+      locator: string | null
+      snippet: string | null
+    }>
+    return rows.map(r => ({
+      kind: r.kind,
+      source: r.source,
+      ...(r.locator !== null ? { locator: r.locator } : {}),
+      ...(r.snippet !== null ? { snippet: r.snippet } : {}),
+    }))
   }
 
   // Ids are deterministic but run-scoped: fingerprints are intentionally

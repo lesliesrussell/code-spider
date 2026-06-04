@@ -196,6 +196,75 @@ describe('suppressions in scan', () => {
   })
 })
 
+// code-spider-l0m
+describe('intelligence explain', () => {
+  test('shows a cycle finding with its import-edge evidence in json', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-explain')
+    seedImportCycle(dbPath)
+
+    // First scan computes findings + evidence
+    ctx.json = true
+    ctx.args = ['cycles']
+    let logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const findingId = (JSON.parse(logs.lines.join('\n')) as { findings: Array<{ id: string }> }).findings[0]!.id
+
+    ctx.args = ['explain', findingId]
+    logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const out = JSON.parse(logs.lines.join('\n')) as {
+      finding: { id: string; ruleId: string }
+      evidence: Array<{ kind: string; locator?: string }>
+    }
+    expect(out.finding.id).toBe(findingId)
+    expect(out.finding.ruleId).toBe('circular-dependency')
+    expect(out.evidence.map(e => e.locator).sort()).toEqual(['src/a.ts -> src/b.ts', 'src/b.ts -> src/a.ts'])
+  })
+
+  test('human output lists evidence lines', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-explain-human')
+    seedImportCycle(dbPath)
+    ctx.args = ['cycles']
+    let logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const idLine = logs.lines.find(l => l.includes('id: fnd_'))!
+    const findingId = idLine.slice(idLine.indexOf('fnd_')).trim()
+
+    ctx.args = ['explain', findingId]
+    logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const text = logs.lines.join('\n')
+    expect(text).toContain('circular-dependency')
+    expect(text).toContain('src/a.ts -> src/b.ts')
+  })
+
+  test('unknown finding id exits 1 with a clean message', () => {
+    const { ctx } = makeIndexedRepo('intel-explain-unknown')
+    const result = Bun.spawnSync({
+      cmd: ['bun', 'run', 'src/index.ts', 'intelligence', 'explain', 'fnd_nope', '--repo', ctx.repoRoot, '--db', ctx.dbPath],
+      cwd: process.cwd(),
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr.toString()).toContain('fnd_nope')
+  })
+})
+
 describe('analyzer fail-soft', () => {
   test('a crashing analyzer warns and later analyzers still run', async () => {
     const { dbPath } = makeIndexedRepo('intel-failsoft')

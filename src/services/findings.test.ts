@@ -125,3 +125,31 @@ describe('FindingsStore', () => {
     expect(cycles[0]!.category).toBe('cycles')
   })
 })
+
+// code-spider-l0m
+describe('finding evidence', () => {
+  test('addEvidence and getEvidence round-trip', () => {
+    const db = makeTempDb('findings-evidence')
+    const store = new FindingsStore(db, 1)
+    const finding = store.add(makeFinding())
+    store.addEvidence(finding.id, {
+      kind: 'graph',
+      source: 'imports',
+      locator: 'src/auth.ts -> src/session.ts',
+    })
+    store.addEvidence(finding.id, {
+      kind: 'graph',
+      source: 'imports',
+      locator: 'src/session.ts -> src/auth.ts',
+    })
+    const evidence = store.getEvidence(finding.id)
+    expect(evidence).toHaveLength(2)
+    expect(evidence[0]!.kind).toBe('graph')
+    expect(evidence.map(e => e.locator)).toContain('src/auth.ts -> src/session.ts')
+  })
+
+  test('getEvidence for unknown finding returns empty', () => {
+    const db = makeTempDb('findings-evidence-none')
+    expect(new FindingsStore(db, 1).getEvidence('fnd_nope')).toEqual([])
+  })
+})

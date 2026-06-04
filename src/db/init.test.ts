@@ -68,3 +68,28 @@ describe('intelligence schema', () => {
     db.close()
   })
 })
+
+// code-spider-l0m
+describe('evidence finding linkage', () => {
+  test('new databases have evidence.finding_id', () => {
+    const db = openDb(join(root, '.code-spider', 'index.db'))
+    const cols = db.query("PRAGMA table_info(evidence)").all() as Array<{ name: string }>
+    expect(cols.map(c => c.name)).toContain('finding_id')
+    db.close()
+  })
+
+  test('legacy databases gain evidence.finding_id', () => {
+    const dbPath = join(root, 'legacy-evidence.db')
+    const legacy = new Database(dbPath, { create: true })
+    legacy.query(`CREATE TABLE runs (id INTEGER PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT, repo_root TEXT NOT NULL, repo_commit TEXT, tool_version TEXT)`).run()
+    legacy.query(`CREATE TABLE nodes (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES runs(id), kind TEXT NOT NULL, key TEXT NOT NULL, label TEXT NOT NULL, path TEXT, language TEXT, summary TEXT, score REAL DEFAULT 0, confidence REAL DEFAULT 0, metadata_json TEXT, UNIQUE(run_id, kind, key))`).run()
+    legacy.query(`CREATE TABLE edges (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES runs(id), from_node_id INTEGER NOT NULL, to_node_id INTEGER NOT NULL, kind TEXT NOT NULL, weight REAL DEFAULT 1, metadata_json TEXT)`).run()
+    legacy.query(`CREATE TABLE evidence (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES runs(id), node_id INTEGER, edge_id INTEGER, kind TEXT NOT NULL, source TEXT NOT NULL, locator TEXT, snippet TEXT, score REAL DEFAULT 0)`).run()
+    legacy.close()
+
+    const db = openDb(dbPath)
+    const cols = db.query("PRAGMA table_info(evidence)").all() as Array<{ name: string }>
+    expect(cols.map(c => c.name)).toContain('finding_id')
+    db.close()
+  })
+})

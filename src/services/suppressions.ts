@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
-import { FindingsStore } from './findings'
+import { FindingsStore, purgeFindings } from './findings'
 import { debugLog } from '../utils/debug'
 
 export interface SuppressionEntry {
@@ -62,7 +62,7 @@ export function applySuppressions(
   now: Date = new Date()
 ): void {
   // Recompute stale-suppression findings from scratch each pass.
-  db.query(`DELETE FROM findings WHERE run_id = ? AND rule_id = 'stale-suppression'`).run(runId)
+  purgeFindings(db, runId, { ruleId: 'stale-suppression' })
   if (entries.length === 0) return
 
   const findings = db
@@ -83,7 +83,7 @@ export function applySuppressions(
 
     if (!expired) {
       for (const f of matched) {
-        db.query(`DELETE FROM findings WHERE run_id = ? AND id = ?`).run(runId, f.id)
+        purgeFindings(db, runId, { id: f.id })
       }
     }
 
