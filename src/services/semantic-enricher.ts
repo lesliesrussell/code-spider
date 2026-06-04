@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import { openDb } from '../db/init'
 import { AnalyzerRunner } from './analyzer-runner'
+// code-spider-0pa
+import { closeLspReferenceSessions } from '../adapters/lsp'
 // code-spider-bik
 import { debugLog } from '../utils/debug'
 
@@ -39,12 +41,12 @@ export interface EnrichResult {
 // Truncation is logged via the debug channel.
 const MAX_SYMBOLS_PER_FILE = 2000
 const MAX_DIAGNOSTICS_PER_FILE = 500
-// code-spider-0pi
-// Reference resolution spawns one LSP session per query, so it is budgeted
-// hard: a few symbols per file, a global ceiling per run. A future session-
-// reuse adapter can lift this.
-const MAX_REF_SYMBOLS_PER_FILE = 5
-const MAX_REF_QUERIES_PER_RUN = 50
+// code-spider-0pi code-spider-0pa
+// Reference queries run against a pooled LSP session (~ms each once warm),
+// so the budget is generous; the global ceiling guards pathological repos
+// and the per-call fallback path, which still spawns per query.
+const MAX_REF_SYMBOLS_PER_FILE = 25
+const MAX_REF_QUERIES_PER_RUN = 500
 
 export class SemanticEnricher {
   constructor(private readonly runner = new AnalyzerRunner()) {}
@@ -245,7 +247,14 @@ export class SemanticEnricher {
     // code-spider-0pi
     // Second pass: resolve references between symbols now that every file's
     // symbols (fresh or carried) are in the table.
-    const symbolEdgesAdded = await this.populateSymbolEdges(db, runId, repoRoot)
+    // code-spider-0pa: pooled LSP sessions stay warm for the whole pass and
+    // are torn down here — leaked servers would outlive the CLI.
+    let symbolEdgesAdded = 0
+    try {
+      symbolEdgesAdded = await this.populateSymbolEdges(db, runId, repoRoot)
+    } finally {
+      closeLspReferenceSessions()
+    }
 
     return { filesProcessed: filesToProcess.length, filesSkipped, filesCarried, symbolsAdded, diagnosticsAdded, symbolEdgesAdded, analyzersRecorded, errors }
   }

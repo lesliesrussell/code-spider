@@ -456,6 +456,218 @@ function sendWorkspaceDidOpens(
   }
 }
 
+// code-spider-0pa
+// Pooled reference sessions: one long-lived LSP process per
+// (command, repoRoot), reused across many textDocument/references queries.
+// Per-call spawning costs ~1s of server cold start per query, which forced
+// the enricher's symbol-edge budget down to 50 queries; a warm session is
+// ~ms per query. Sessions fail soft: a dead session removes itself from the
+// pool and the caller falls back to the per-call path.
+const REQUEST_TIMEOUT_MS = 10_000
+
+class PooledReferenceSession {
+  private pending = new Map<number, (result: LspLocation[] | null) => void>()
+  private nextId = 100
+  private openedUris = new Set<string>()
+  private dead = false
+
+  private constructor(
+    private proc: ReturnType<typeof spawn>,
+    private languageId: string
+  ) {}
+
+  static open(command: string[], repoRoot: string, languageId: string): Promise<PooledReferenceSession | null> {
+    return new Promise(resolve => {
+      const [bin, ...args] = command
+      if (bin === undefined) {
+        resolve(null)
+        return
+      }
+      let proc: ReturnType<typeof spawn>
+      try {
+        proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+        trackProc(proc)
+      } catch (err) {
+        debugLog('lsp-pool', `failed to spawn ${bin}`, err)
+        resolve(null)
+        return
+      }
+      const session = new PooledReferenceSession(proc, languageId)
+      let resolved = false
+      const settle = (value: PooledReferenceSession | null): void => {
+        if (resolved) return
+        resolved = true
+        if (value === null) session.close()
+        resolve(value)
+      }
+      const initTimer = setTimeout(() => settle(null), REQUEST_TIMEOUT_MS)
+
+      const parser = new JsonRpcFrameParser()
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        for (const parsed of parser.push(chunk)) {
+          const msg = parsed as { id?: number; result?: unknown }
+          if (!resolved && msg.id === 1 && msg.result !== undefined) {
+            clearTimeout(initTimer)
+            session.send({ jsonrpc: '2.0', method: 'initialized', params: {} })
+            settle(session)
+            continue
+          }
+          session.dispatch(msg)
+        }
+      })
+      proc.on('error', (err: Error) => {
+        debugLog('lsp-pool', 'pooled server process error', err)
+        session.markDead()
+        settle(null)
+      })
+      proc.on('close', () => {
+        session.markDead()
+        settle(null)
+      })
+
+      session.send({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          processId: process.pid,
+          rootUri: fileUri(repoRoot),
+          capabilities: { textDocument: { references: { dynamicRegistration: false } } },
+          initializationOptions: {},
+        },
+      })
+    })
+  }
+
+  get alive(): boolean {
+    return !this.dead
+  }
+
+  // didOpen is incremental: only files the server has not seen yet.
+  ensureOpen(workspaceFiles: Array<{ path: string; text: string }>): void {
+    for (const file of workspaceFiles) {
+      const uri = fileUri(file.path)
+      if (this.openedUris.has(uri)) continue
+      this.openedUris.add(uri)
+      this.send({
+        jsonrpc: '2.0',
+        method: 'textDocument/didOpen',
+        params: { textDocument: { uri, languageId: this.languageId, version: 1, text: file.text } },
+      })
+    }
+  }
+
+  references(filePath: string, position: { line: number; character: number }): Promise<LspLocation[] | null> {
+    if (this.dead) return Promise.resolve(null)
+    const id = this.nextId++
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        resolve(null)
+      }, REQUEST_TIMEOUT_MS)
+      this.pending.set(id, result => {
+        clearTimeout(timer)
+        resolve(result)
+      })
+      this.send({
+        jsonrpc: '2.0',
+        id,
+        method: 'textDocument/references',
+        params: {
+          textDocument: { uri: fileUri(filePath) },
+          position,
+          context: { includeDeclaration: true },
+        },
+      })
+    })
+  }
+
+  close(): void {
+    this.markDead()
+    try {
+      this.send({ jsonrpc: '2.0', id: 99_999, method: 'shutdown', params: null })
+      this.send({ jsonrpc: '2.0', method: 'exit', params: null })
+    } catch {
+      // already gone
+    }
+    try {
+      this.proc.kill()
+    } catch {
+      // already gone
+    }
+  }
+
+  private send(msg: object): void {
+    const body = JSON.stringify(msg)
+    try {
+      this.proc.stdin?.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
+    } catch (err) {
+      debugLog('lsp-pool', 'write to pooled server failed', err)
+      this.markDead()
+    }
+  }
+
+  private dispatch(msg: { id?: number; result?: unknown }): void {
+    if (msg.id === undefined) return
+    const resolver = this.pending.get(msg.id)
+    if (resolver === undefined) return
+    this.pending.delete(msg.id)
+    resolver(Array.isArray(msg.result) ? normalizeLocations(msg.result) : [])
+  }
+
+  private markDead(): void {
+    this.dead = true
+    for (const [, resolver] of this.pending) resolver(null)
+    this.pending.clear()
+  }
+}
+
+function normalizeLocations(result: unknown[]): LspLocation[] {
+  return result.flatMap(item => {
+    const raw = item as Record<string, unknown>
+    const locationUri = typeof raw['uri'] === 'string' ? raw['uri'] : undefined
+    const range = raw['range'] as LspLocation['range'] | undefined
+    if (!locationUri || !range) return []
+    return [{ uri: locationUri, range }]
+  })
+}
+
+// Pool keyed by command + repoRoot — one server per language per repo.
+// 'failed' poisons a key so a server that cannot start is not respawned for
+// every query of a run.
+const referenceSessionPool = new Map<string, PooledReferenceSession | 'failed'>()
+
+export function closeLspReferenceSessions(): void {
+  for (const session of referenceSessionPool.values()) {
+    if (session !== 'failed') session.close()
+  }
+  referenceSessionPool.clear()
+}
+
+async function pooledLspReferences(
+  command: string[],
+  repoRoot: string,
+  languageId: string,
+  filePath: string,
+  position: { line: number; character: number },
+  workspaceFiles: Array<{ path: string; text: string }>
+): Promise<LspLocation[] | null> {
+  const key = `${command.join(' ')}|${repoRoot}`
+  let session = referenceSessionPool.get(key)
+  if (session === 'failed') return null
+  if (session === undefined || !session.alive) {
+    const opened = await PooledReferenceSession.open(command, repoRoot, languageId)
+    if (opened === null) {
+      referenceSessionPool.set(key, 'failed')
+      return null
+    }
+    session = opened
+    referenceSessionPool.set(key, session)
+  }
+  session.ensureOpen(workspaceFiles)
+  return session.references(filePath, position)
+}
+
 // Attempt real LSP communication via stdio JSON-RPC
 async function tryRealLspDocumentSymbols(
   filePath: string,
@@ -669,14 +881,27 @@ export class LspAdapter {
         ? workspaceFiles
         : [{ path: filePath, text: readFileSync(filePath, 'utf8') }, ...workspaceFiles]
 
-      const locations = await tryRealLspReferences(
-        filePath,
+      // code-spider-0pa
+      // Pooled session first (one warm server per command+repo); a dead or
+      // unopenable pool falls back to the original per-call spawn.
+      let locations = await pooledLspReferences(
         selectedCommand,
-        langLower,
-        position,
         repoRoot,
+        langLower,
+        filePath,
+        position,
         ensuredTarget,
       )
+      if (locations === null) {
+        locations = await tryRealLspReferences(
+          filePath,
+          selectedCommand,
+          langLower,
+          position,
+          repoRoot,
+          ensuredTarget,
+        )
+      }
       if (locations !== null) {
         return {
           locations: locations.map(location => ({
