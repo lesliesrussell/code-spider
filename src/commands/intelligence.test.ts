@@ -265,6 +265,27 @@ describe('intelligence explain', () => {
   })
 })
 
+// code-spider-773
+describe('scan --format md', () => {
+  test('renders a grouped markdown report with evidence', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-md')
+    seedImportCycle(dbPath)
+    ctx.args = ['scan']
+    ctx.flags = { format: 'md' }
+    const logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const md = logs.lines.join('\n')
+    expect(md).toContain('# Intelligence findings (run #1)')
+    expect(md).toContain('## cycles')
+    expect(md).toContain('circular-dependency')
+    expect(md).toContain('- graph/imports: src/a.ts -> src/b.ts')
+  })
+})
+
 describe('analyzer fail-soft', () => {
   test('a crashing analyzer warns and later analyzers still run', async () => {
     const { dbPath } = makeIndexedRepo('intel-failsoft')

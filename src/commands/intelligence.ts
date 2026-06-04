@@ -24,11 +24,14 @@ import { ManifestAnalyzer } from '../services/manifest'
 import { ArchitectureAnalyzer, loadArchitectureOptions } from '../services/architecture'
 // code-spider-9cg
 import { SymbolUnusedAnalyzer } from '../services/symbol-unused'
+// code-spider-773
+import { renderFindingsMarkdown } from '../services/findings-report'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
 Subcommands:
-  scan [--category <c>]   Run all intelligence analyzers and list findings
+  scan [--category <c>] [--format table|json|md]
+                          Run all intelligence analyzers and list findings
                           (categories: reachability|cycles|duplication|hotspots|architecture)
   cycles                  Detect circular dependencies in the import graph
   unused                  Find files unreachable from configured entrypoints
@@ -167,13 +170,25 @@ export default async function run(ctx: CliContext): Promise<void> {
   // become findings themselves.
   applySuppressions(db, runId, loadSuppressions(ctx.repoRoot))
 
-  const findings = new FindingsStore(db, runId).list(filter)
+  const store = new FindingsStore(db, runId)
+  const findings = store.list(filter)
   const byCategory: Record<string, number> = {}
   for (const f of findings) {
     byCategory[f.category] = (byCategory[f.category] ?? 0) + 1
   }
 
-  if (ctx.json) {
+  // code-spider-773
+  const format = typeof ctx.flags['format'] === 'string' ? ctx.flags['format'] : undefined
+  if (format !== undefined && format !== 'table' && format !== 'json' && format !== 'md') {
+    console.error(`Unknown format: ${format} (expected table|json|md)`)
+    process.exit(1)
+  }
+  if (format === 'md') {
+    console.log(renderFindingsMarkdown(runId, findings, id => store.getEvidence(id)))
+    return
+  }
+
+  if (ctx.json || format === 'json') {
     console.log(JSON.stringify({ runId, summary: { findings: findings.length, byCategory }, findings }, null, 2))
     return
   }
