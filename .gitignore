@@ -36,3 +36,6 @@ Thumbs.db
 .dolt/
 *.db
 .beads-credential-key
+
+# omc session state (rewritten every session)
+.omc/
