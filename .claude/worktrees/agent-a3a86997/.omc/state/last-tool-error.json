@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd /Users/leslierussell/repo/code-spider && bun run src/index.ts doctor 2>&1\"}",
-  "error": "Exit code 2\ncd:2: no such file or directory: \nsort: No such file or directory",
-  "timestamp": "2026-04-19T07:49:20.223Z",
-  "retry_count": 1
-}

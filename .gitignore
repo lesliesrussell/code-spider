@@ -39,3 +39,6 @@ Thumbs.db
 
 # omc session state (rewritten every session)
 .omc/
+.beads/
+.claude/
+.code-spider/
