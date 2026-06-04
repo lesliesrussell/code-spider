@@ -16,6 +16,8 @@ import { ReachabilityAnalyzer } from '../services/reachability'
 import { loadSuppressions, applySuppressions } from '../services/suppressions'
 // code-spider-9kx
 import { DuplicationAnalyzer, loadDuplicationOptions } from '../services/duplication'
+// code-spider-p1d
+import { HotspotAnalyzer, loadHotspotOptions } from '../services/hotspots'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
@@ -24,7 +26,8 @@ Subcommands:
                           (categories: reachability|cycles|duplication|hotspots|architecture)
   cycles                  Detect circular dependencies in the import graph
   unused                  Find files unreachable from configured entrypoints
-  dupes                   Detect duplicated files and regions (strict token match)`
+  dupes                   Detect duplicated files and regions (strict token match)
+  hotspots                Rank risk hotspots (complexity, centrality, churn, dupes, cycles)`
 
 const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions']
 
@@ -59,6 +62,14 @@ const ANALYZERS: IntelAnalyzer[] = [
     run: async (db, runId, repoRoot) =>
       void (await new DuplicationAnalyzer().analyze(db, runId, loadDuplicationOptions(repoRoot))),
   },
+  // code-spider-p1d
+  // Must run after cycles and duplication: it folds their findings into the
+  // composite score.
+  {
+    name: 'hotspots',
+    category: 'hotspots',
+    run: (db, runId, repoRoot) => void new HotspotAnalyzer().analyze(db, runId, loadHotspotOptions(repoRoot)),
+  },
 ]
 
 export async function runAnalyzers(
@@ -80,7 +91,7 @@ export async function runAnalyzers(
 
 export default async function run(ctx: CliContext): Promise<void> {
   const sub = ctx.args[0]
-  if (sub !== 'scan' && sub !== 'cycles' && sub !== 'unused' && sub !== 'dupes') {
+  if (sub !== 'scan' && sub !== 'cycles' && sub !== 'unused' && sub !== 'dupes' && sub !== 'hotspots') {
     console.error(INTEL_USAGE)
     process.exit(1)
   }
@@ -108,7 +119,13 @@ export default async function run(ctx: CliContext): Promise<void> {
   if (sub === 'unused') filter.category = 'reachability'
   // code-spider-9kx
   if (sub === 'dupes') filter.category = 'duplication'
-  await runAnalyzers(db, runId, ctx.repoRoot, filter.category)
+  // code-spider-p1d
+  // hotspots composes other analyzers' findings, so whenever it's the target
+  // (subcommand or --category) the full pipeline runs and only the listing
+  // is filtered.
+  if (sub === 'hotspots') filter.category = 'hotspots'
+  const analyzerFilter = filter.category === 'hotspots' ? undefined : filter.category
+  await runAnalyzers(db, runId, ctx.repoRoot, analyzerFilter)
   // code-spider-c4l
   // Suppressions evaluate against the fresh analyzer results; stale entries
   // become findings themselves.
