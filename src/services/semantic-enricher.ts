@@ -27,6 +27,8 @@ export interface EnrichResult {
   filesCarried: number
   symbolsAdded: number
   diagnosticsAdded: number
+  // code-spider-0pi: references edges resolved between symbols
+  symbolEdgesAdded: number
   analyzersRecorded: number
   errors: number
 }
@@ -37,6 +39,12 @@ export interface EnrichResult {
 // Truncation is logged via the debug channel.
 const MAX_SYMBOLS_PER_FILE = 2000
 const MAX_DIAGNOSTICS_PER_FILE = 500
+// code-spider-0pi
+// Reference resolution spawns one LSP session per query, so it is budgeted
+// hard: a few symbols per file, a global ceiling per run. A future session-
+// reuse adapter can lift this.
+const MAX_REF_SYMBOLS_PER_FILE = 5
+const MAX_REF_QUERIES_PER_RUN = 50
 
 export class SemanticEnricher {
   constructor(private readonly runner = new AnalyzerRunner()) {}
@@ -233,6 +241,125 @@ export class SemanticEnricher {
     if (filesCarried > 0) {
       debugLog('semantic-enricher', `carried forward ${filesCarried} unchanged files from the previous run`)
     }
-    return { filesProcessed: filesToProcess.length, filesSkipped, filesCarried, symbolsAdded, diagnosticsAdded, analyzersRecorded, errors }
+
+    // code-spider-0pi
+    // Second pass: resolve references between symbols now that every file's
+    // symbols (fresh or carried) are in the table.
+    const symbolEdgesAdded = await this.populateSymbolEdges(db, runId, repoRoot)
+
+    return { filesProcessed: filesToProcess.length, filesSkipped, filesCarried, symbolsAdded, diagnosticsAdded, symbolEdgesAdded, analyzersRecorded, errors }
+  }
+
+  // code-spider-0pi
+  // For each (budgeted) symbol, ask the language plugin who references it,
+  // then resolve each referencing location to its smallest enclosing symbol.
+  // Edge direction: referencing symbol -> referenced symbol. Failures
+  // degrade per symbol; runs without a refs-capable analyzer add nothing.
+  private async populateSymbolEdges(
+    db: ReturnType<typeof openDb>,
+    runId: number,
+    repoRoot: string
+  ): Promise<number> {
+    interface SymbolRow {
+      id: number
+      node_id: number
+      path: string
+      language: string
+      name: string
+      range_json: string | null
+      selection_range_json: string | null
+    }
+    const rows = db
+      .query<SymbolRow, [number]>(
+        `SELECT s.id, s.node_id, n.path, n.language, s.name, s.range_json, s.selection_range_json
+         FROM symbols s JOIN nodes n ON s.node_id = n.id
+         WHERE s.run_id = ? AND n.path IS NOT NULL
+         ORDER BY n.path, s.id`
+      )
+      .all(runId)
+
+    interface Position {
+      line: number
+      character: number
+    }
+    interface Range {
+      start: Position
+      end: Position
+    }
+    const parseRange = (json: string | null): Range | null => {
+      if (json === null) return null
+      try {
+        return JSON.parse(json) as Range
+      } catch {
+        return null
+      }
+    }
+    const before = (a: Position, b: Position): boolean =>
+      a.line < b.line || (a.line === b.line && a.character <= b.character)
+    const contains = (range: Range, pos: Position): boolean => before(range.start, pos) && before(pos, range.end)
+    const rangeSize = (range: Range): number => (range.end.line - range.start.line) * 10_000 + (range.end.character - range.start.character)
+
+    const byPath = new Map<string, Array<SymbolRow & { range: Range | null }>>()
+    for (const row of rows) {
+      const list = byPath.get(row.path) ?? []
+      list.push({ ...row, range: parseRange(row.range_json) })
+      byPath.set(row.path, list)
+    }
+
+    db.query('DELETE FROM symbol_edges WHERE run_id = ?').run(runId)
+    const insertEdge = db.prepare(
+      'INSERT INTO symbol_edges (run_id, from_symbol_id, to_symbol_id, kind, metadata_json) VALUES (?,?,?,?,?)'
+    )
+    const seen = new Set<string>()
+    let added = 0
+    let queries = 0
+
+    for (const [path, symbols] of [...byPath.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      for (const target of symbols.slice(0, MAX_REF_SYMBOLS_PER_FILE)) {
+        if (queries >= MAX_REF_QUERIES_PER_RUN) {
+          debugLog('semantic-enricher', `symbol-edge budget (${MAX_REF_QUERIES_PER_RUN} queries) reached — remaining symbols skipped`)
+          return added
+        }
+        const position = (parseRange(target.selection_range_json) ?? target.range)?.start
+        if (position === undefined || position === null) continue
+        queries++
+        try {
+          const refs = await this.runner.executeReferences({
+            db,
+            runId,
+            nodeId: target.node_id,
+            filePath: join(repoRoot, path),
+            repoRoot,
+            language: target.language,
+            target: path,
+            position,
+          })
+          for (const location of refs.locations) {
+            // Locations come back absolute; the symbol table is keyed by
+            // repo-relative paths.
+            const relPath = location.path.startsWith(`${repoRoot}/`)
+              ? location.path.slice(repoRoot.length + 1)
+              : location.path
+            const candidates = byPath.get(relPath) ?? []
+            let enclosing: (SymbolRow & { range: Range | null }) | undefined
+            for (const candidate of candidates) {
+              if (candidate.range === null || !contains(candidate.range, location.range.start)) continue
+              if (enclosing === undefined || rangeSize(candidate.range) < rangeSize(enclosing.range!)) {
+                enclosing = candidate
+              }
+            }
+            if (enclosing === undefined || enclosing.id === target.id) continue
+            const key = `${enclosing.id}>${target.id}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            insertEdge.run(runId, enclosing.id, target.id, 'references', JSON.stringify({ analyzer_id: refs.analyzerId }))
+            added++
+          }
+        } catch (err) {
+          debugLog('semantic-enricher', `reference resolution failed for ${path}:${target.name}`, err)
+        }
+      }
+    }
+    return added
   }
 }
