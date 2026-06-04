@@ -24,6 +24,9 @@ Designed for deep exploration: languages, zones, hotspots, git context, markdown
   - Beads (issues, tasks, dependencies)
 - **Language plugins** — first-class support for TypeScript/JavaScript (tsserver LSP + heuristic) and Zig (zls + zig-ast-check). Extensible registry.
 - **Hotspot & flow analysis** — identifies active areas and logical subsystems
+- **Intelligence findings** — dead code, dependency cycles, duplication, risk
+  hotspots, and architecture-rule violations as stable, evidence-backed,
+  CI-trackable findings (`intelligence scan`, see below)
 
 Perfect companion for the `code-spider-claude` and `code-spider-codex` skills included in this repository.
 
@@ -104,6 +107,76 @@ flows:
   event_patterns: []
   cli_patterns:
     - "argparse\.ArgumentParser"
+```
+
+## Intelligence Findings
+
+A static-analysis suite over the index: every claim is a *finding* with a
+stable fingerprint (survives line drift — CI and agents can track it across
+runs), a confidence level, and supporting evidence on request.
+
+```bash
+code-spider intelligence scan                 # run all analyzers, list findings
+code-spider intelligence scan --format md     # markdown report (also: json, sarif)
+code-spider intelligence cycles               # circular dependencies (Tarjan SCC)
+code-spider intelligence unused               # files/deps/symbols unreachable from entrypoints
+code-spider intelligence dupes                # duplicated files, regions, clone classes
+code-spider intelligence hotspots             # weighted composite risk ranking
+code-spider intelligence arch                 # declared layer/boundary rule violations
+code-spider intelligence explain <finding-id> # one finding with its evidence
+```
+
+`scan --category reachability|cycles|duplication|hotspots|architecture|suppressions`
+filters; `--format sarif` emits SARIF 2.1.0 with fingerprints as
+`partialFingerprints` for GitHub code scanning.
+
+### Configuration (`.code-spider/config.yaml`)
+
+```yaml
+intelligence:
+  entrypoints:            # reachability roots (explicit; conventions like
+    - src/index.ts        # package.json bin/main, shebangs, and route files
+                          # are inferred automatically and marked lower-trust)
+  duplication:
+    mode: normalized      # strict (default) = exact tokens; normalized
+    min-tokens: 40        # collapses string/number literals
+  hotspots:
+    weights: { complexity: 0.3, centrality: 0.2, churn: 0.2, duplication: 0.15, cycles: 0.15 }
+  architecture:
+    layers:
+      - [app, domain, infra]      # earlier may import later, never reverse
+    rules:
+      - from: "src/ui/**"
+        to: "src/db/**"
+        kind: forbid-import
+  suppressions:
+    - rule: unused-file
+      path: "src/legacy/**"
+      expires: "2026-12-31"
+      owner: platform-team
+      reason: migration fallback
+```
+
+Suppressions are themselves analyzable: expired or never-matching entries
+surface as `stale-suppression` findings instead of silently rotting.
+
+### Honesty model
+
+The suite reports uncertainty rather than rounding it away:
+
+- Files reachable **only through dynamic imports** get low-confidence
+  "possibly unused" findings, not silent passes or false warnings.
+- Symbol-level rules (`unused-export`, `unused-symbol`) need a `--semantic`
+  index and only judge symbols whose references were **actually queried**
+  within the LSP budget — "never asked" is not "unreferenced".
+- Analyzers fail soft: a crash records a warning and the rest of the scan
+  proceeds.
+
+```bash
+# Symbol-level depth first:
+code-spider index . --semantic
+code-spider intelligence unused
+code-spider intelligence explain fnd_r12_ab34cd56ef781234   # show the evidence
 ```
 
 ## Architecture
@@ -212,9 +285,11 @@ Built to support deep understanding of complex projects (language VMs, toolchain
 ## Roadmap / Active Areas
 
 - Further stabilization of semantic references and context enrichers
+  (LSP session reuse to lift the symbol-reference budget)
 - Richer beads/work-item integration
 - Additional language plugins (especially for Lisp/Scheme ecosystems)
-- Improved report export formats for agents
+- `tested-by` edge population (orphan-test detection currently uses the
+  co-located sibling convention)
 - First-class support for investigation sessions
 
 Recent tickets (code-spider-*) have focused on context layer rollout, doctor accuracy, plugin architecture, and atom tagging.
