@@ -47,6 +47,7 @@ Commands:
   intelligence unused                  Find files unreachable from configured entrypoints
   intelligence dupes                   Detect duplicated files and regions
   intelligence hotspots                Rank risk hotspots by weighted signals
+  intelligence arch                    Check declared layer and boundary rules
   intelligence explain <finding-id>    Show a finding with its supporting evidence
 
 Options (all commands):

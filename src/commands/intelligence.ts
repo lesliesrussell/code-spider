@@ -20,6 +20,8 @@ import { DuplicationAnalyzer, loadDuplicationOptions } from '../services/duplica
 import { HotspotAnalyzer, loadHotspotOptions } from '../services/hotspots'
 // code-spider-ty9
 import { ManifestAnalyzer } from '../services/manifest'
+// code-spider-ek5
+import { ArchitectureAnalyzer, loadArchitectureOptions } from '../services/architecture'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
@@ -30,6 +32,7 @@ Subcommands:
   unused                  Find files unreachable from configured entrypoints
   dupes                   Detect duplicated files and regions (strict token match)
   hotspots                Rank risk hotspots (complexity, centrality, churn, dupes, cycles)
+  arch                    Check declared layer and boundary rules
   explain <finding-id>    Show a finding with its supporting evidence`
 
 const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions']
@@ -71,6 +74,13 @@ const ANALYZERS: IntelAnalyzer[] = [
     run: async (db, runId, repoRoot) =>
       void (await new DuplicationAnalyzer().analyze(db, runId, loadDuplicationOptions(repoRoot))),
   },
+  // code-spider-ek5
+  {
+    name: 'architecture',
+    category: 'architecture',
+    run: (db, runId, repoRoot) =>
+      void new ArchitectureAnalyzer().analyze(db, runId, loadArchitectureOptions(repoRoot)),
+  },
   // code-spider-p1d
   // Must run after cycles and duplication: it folds their findings into the
   // composite score.
@@ -100,7 +110,7 @@ export async function runAnalyzers(
 
 export default async function run(ctx: CliContext): Promise<void> {
   const sub = ctx.args[0]
-  const SUBCOMMANDS = ['scan', 'cycles', 'unused', 'dupes', 'hotspots', 'explain']
+  const SUBCOMMANDS = ['scan', 'cycles', 'unused', 'dupes', 'hotspots', 'arch', 'explain']
   if (sub === undefined || !SUBCOMMANDS.includes(sub)) {
     console.error(INTEL_USAGE)
     process.exit(1)
@@ -135,6 +145,8 @@ export default async function run(ctx: CliContext): Promise<void> {
   if (sub === 'unused') filter.category = 'reachability'
   // code-spider-9kx
   if (sub === 'dupes') filter.category = 'duplication'
+  // code-spider-ek5
+  if (sub === 'arch') filter.category = 'architecture'
   // code-spider-p1d
   // hotspots composes other analyzers' findings, so whenever it's the target
   // (subcommand or --category) the full pipeline runs and only the listing
