@@ -10,6 +10,8 @@ import { loadDefaultAnalyzerRegistrySafe, registryExtensionLanguages } from '../
 import { MarkdownContextIndexer } from './markdown-context'
 // code-spider-89w
 import { scanUnitImports } from './import-edges'
+// code-spider-0fy
+import { loadEntrypointGlobs, isEntrypoint } from './entrypoints'
 
 export interface IndexOptions {
   repoRoot: string
@@ -206,6 +208,9 @@ export class Indexer {
       if (churn > maxChurn) maxChurn = churn
     }
 
+    // code-spider-0fy
+    const entrypointGlobs = loadEntrypointGlobs(repoRoot)
+
     // Insert unit nodes
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
@@ -222,7 +227,13 @@ export class Indexer {
         file.language,
         // code-spider-oun
         // Stat fingerprint for incremental enrichment change detection.
-        JSON.stringify({ sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs }),
+        // code-spider-0fy: explicit config entrypoints are stamped here so
+        // reachability and navigation read them off the node.
+        JSON.stringify({
+          sizeBytes: file.sizeBytes,
+          mtimeMs: file.mtimeMs,
+          ...(isEntrypoint(entrypointGlobs, file.relPath) ? { entrypoint: true } : {}),
+        }),
       )
 
       const nodeRow = getNodeId.get(runId, 'unit', `unit:${file.relPath}`) as { id: number } | undefined

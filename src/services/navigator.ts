@@ -10,6 +10,8 @@ export interface NodeRow {
   summary: string | null
   score: number
   confidence: number
+  // code-spider-0fy: 1 when the unit matches a configured entrypoint glob
+  entrypoint: number | null
 }
 
 export interface NodeStats {
@@ -53,7 +55,20 @@ export interface BeadsContextRow {
   weight: number
 }
 
-const NODE_SELECT = 'id,kind,key,label,path,language,summary,score,confidence'
+// code-spider-0fy: entrypoint rides along on every node read. nodeSelect()
+// table-qualifies every column expression, so callers that alias the nodes
+// table use nodeSelect('n') instead of string-splitting on commas (which
+// breaks inside json_extract).
+const NODE_COLUMNS = ['id', 'kind', 'key', 'label', 'path', 'language', 'summary', 'score', 'confidence']
+
+function nodeSelect(prefix = ''): string {
+  const p = prefix === '' ? '' : `${prefix}.`
+  const columns = NODE_COLUMNS.map(c => `${p}${c}`)
+  columns.push(`json_extract(${p}metadata_json,'$.entrypoint') AS entrypoint`)
+  return columns.join(',')
+}
+
+const NODE_SELECT = nodeSelect()
 
 export class Navigator {
   constructor(private db: Database, private runId: number) {}
@@ -196,7 +211,7 @@ export class Navigator {
       const zoneName = key.slice('zone:'.length)
       if (sortBy === 'score') {
         return this.db.query<NodeRow, [number, string, number]>(
-          `SELECT ${NODE_SELECT.split(',').map(c => `n.${c}`).join(',')} FROM nodes n WHERE n.run_id=? AND n.kind='unit' AND n.path LIKE ? ORDER BY n.score DESC LIMIT ?`
+          `SELECT ${nodeSelect('n')} FROM nodes n WHERE n.run_id=? AND n.kind='unit' AND n.path LIKE ? ORDER BY n.score DESC LIMIT ?`
         ).all(this.runId, `${zoneName}/%`, limit)
       }
 
@@ -208,7 +223,7 @@ export class Navigator {
           : 'loc'
       const sortDir = sortBy === 'recent' ? 'ASC' : 'DESC'
       return this.db.query<NodeRow, [number, string, number, string, number]>(
-        `SELECT ${NODE_SELECT.split(',').map(c => `n.${c}`).join(',')}
+        `SELECT ${nodeSelect('n')}
          FROM nodes n
          LEFT JOIN stats s ON s.node_id=n.id AND s.run_id=? AND s.metric=?
          WHERE n.run_id=? AND n.kind='unit' AND n.path LIKE ?
