@@ -22,6 +22,8 @@ export const SCHEMA: string[] = [
   metadata_json TEXT,
   UNIQUE(run_id, kind, key)
 )`,
+  // code-spider-0ok: confidence < 1 marks uncertain edges (dynamic imports,
+  // convention wiring) so reachability can propagate doubt instead of lying.
   `CREATE TABLE IF NOT EXISTS edges (
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES runs(id),
@@ -29,6 +31,7 @@ export const SCHEMA: string[] = [
   to_node_id INTEGER NOT NULL REFERENCES nodes(id),
   kind TEXT NOT NULL,
   weight REAL DEFAULT 1,
+  confidence REAL NOT NULL DEFAULT 1,
   metadata_json TEXT
 )`,
   `CREATE TABLE IF NOT EXISTS evidence (
@@ -166,4 +169,25 @@ export const SCHEMA: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_analyzer_runs_run ON analyzer_runs(run_id)`,
   // code-spider-403
   `CREATE INDEX IF NOT EXISTS idx_embeddings_run_node ON embeddings(run_id, node_id)`,
+  // code-spider-0ok
+  // Intelligence findings: stable fingerprints let CI and agents track a
+  // finding across runs even as line numbers drift. Locations/metrics/tags
+  // are JSON; evidence links through the existing evidence table.
+  `CREATE TABLE IF NOT EXISTS findings (
+  id TEXT PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES runs(id),
+  rule_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  node_key TEXT,
+  locations_json TEXT NOT NULL,
+  metrics_json TEXT,
+  tags_json TEXT
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint)`,
+  `CREATE INDEX IF NOT EXISTS idx_findings_run_rule ON findings(run_id, rule_id)`,
 ]

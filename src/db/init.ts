@@ -27,6 +27,19 @@ function initializeSchema(db: Database): void {
   for (const stmt of SCHEMA) {
     db.query(stmt).run()
   }
+  migrateExistingTables(db)
+}
+
+// code-spider-0ok
+// CREATE TABLE IF NOT EXISTS never alters an existing table, so column
+// additions need explicit pragma-guarded ALTERs for databases created
+// before the column existed. Same idempotent-on-every-open spirit as the
+// schema loop above.
+function migrateExistingTables(db: Database): void {
+  const edgeCols = db.query('PRAGMA table_info(edges)').all() as Array<{ name: string }>
+  if (!edgeCols.some(c => c.name === 'confidence')) {
+    db.query('ALTER TABLE edges ADD COLUMN confidence REAL NOT NULL DEFAULT 1').run()
+  }
 }
 
 export function openDb(dbPath: string): Database {

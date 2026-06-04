@@ -41,6 +41,8 @@ Commands:
   investigate show <inv-id>            Show an investigation
   export report <node-ref|inv-id> [--format md|json]
                                        Export a report
+  intelligence scan [--category <c>]   List analyzer findings from the latest run
+                                       (reachability|cycles|duplication|hotspots|architecture)
 
 Options (all commands):
   --repo <path>    Target repository (default: cwd)
@@ -173,6 +175,12 @@ async function main(): Promise<void> {
     }
     case 'export': {
       const mod = await import('./commands/export-cmd')
+      await mod.default(ctx)
+      break
+    }
+    // code-spider-0ok
+    case 'intelligence': {
+      const mod = await import('./commands/intelligence')
       await mod.default(ctx)
       break
     }
