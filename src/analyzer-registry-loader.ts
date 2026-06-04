@@ -1,5 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+// code-spider-xof
+// Bun embeds text imports into compiled binaries (bun build --compile), so
+// the default registry travels inside dist/code-spider instead of being
+// resolved from a config/ directory that doesn't exist next to the binary.
+import EMBEDDED_REGISTRY_TEXT from '../config/analyzers.yaml' with { type: 'text' }
 import {
   ANALYZER_CAPABILITIES,
   ANALYZER_KINDS,
@@ -431,9 +436,17 @@ export function loadAnalyzerRegistryFromPath(path: string): AnalyzerRegistryDocu
   }
 }
 
+// code-spider-xof
+// A config/analyzers.yaml ON DISK next to the source tree (dev mode, or a
+// user-patched install) overrides the embedded copy; the embedded copy is
+// the default everywhere else — notably inside compiled binaries, where
+// import.meta.dir points into the bundle and nothing exists on disk.
 export function loadDefaultAnalyzerRegistry(): AnalyzerRegistryDocument {
   const defaultPath = resolve(import.meta.dir, '..', 'config', 'analyzers.yaml')
-  return loadAnalyzerRegistryFromPath(defaultPath)
+  if (existsSync(defaultPath)) {
+    return loadAnalyzerRegistryFromPath(defaultPath)
+  }
+  return parseAnalyzerRegistry(EMBEDDED_REGISTRY_TEXT)
 }
 
 // code-spider-d12
@@ -446,28 +459,30 @@ export interface AnalyzerRegistryLoadResult {
 // code-spider-d12
 // Fail-soft entry point: a user-edited analyzers.yaml with a syntax slip must
 // not crash doctor and every semantic command. The strict parser still throws
-// (validation stays sharp); this wrapper substitutes an empty registry —
-// structural-only mode keeps working — and reports the error so doctor can
-// surface it.
+// (validation stays sharp); this wrapper substitutes the embedded built-in
+// registry — semantic analyzers keep working with stock config — and reports
+// the error so doctor can surface it. (code-spider-xof: fallback upgraded
+// from an empty registry to the embedded default.)
 export function loadAnalyzerRegistrySafeFromPath(path: string): AnalyzerRegistryLoadResult {
   try {
     return { registry: loadAnalyzerRegistryFromPath(path) }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return {
-      registry: {
-        version: ANALYZER_REGISTRY_VERSION,
-        capabilities: [...ANALYZER_CAPABILITIES],
-        languages: [],
-      },
+      registry: parseAnalyzerRegistry(EMBEDDED_REGISTRY_TEXT),
       error: message,
     }
   }
 }
 
-// code-spider-d12
+// code-spider-d12 code-spider-xof
 export function loadDefaultAnalyzerRegistrySafe(): AnalyzerRegistryLoadResult {
-  return loadAnalyzerRegistrySafeFromPath(resolve(import.meta.dir, '..', 'config', 'analyzers.yaml'))
+  const defaultPath = resolve(import.meta.dir, '..', 'config', 'analyzers.yaml')
+  if (existsSync(defaultPath)) {
+    return loadAnalyzerRegistrySafeFromPath(defaultPath)
+  }
+  // Compiled binary: no file on disk — the embedded copy is authoritative.
+  return { registry: parseAnalyzerRegistry(EMBEDDED_REGISTRY_TEXT) }
 }
 
 // code-spider-ofm

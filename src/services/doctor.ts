@@ -623,14 +623,14 @@ export class DoctorService {
             message: 'not reachable — find/--embed unavailable (structural features unaffected)',
             remedy: 'Start ollama, or set CODE_SPIDER_OLLAMA_URL',
           }
-    // code-spider-d12
+    // code-spider-d12 code-spider-xof
     const registryCheck: Check = registryLoad.error === undefined
       ? { name: 'analyzer-registry', status: 'pass', message: `${registry.languages.length} languages configured` }
       : {
           name: 'analyzer-registry',
-          status: 'fail',
-          message: `analyzers.yaml unusable — semantic analyzers disabled (${registryLoad.error})`,
-          remedy: 'Fix config/analyzers.yaml syntax; structural indexing still works meanwhile',
+          status: 'warn',
+          message: `analyzers.yaml unusable — using built-in registry (${registryLoad.error})`,
+          remedy: 'Fix config/analyzers.yaml syntax, or delete it to use the embedded default',
         }
     const { check: dbCheck, db, lastRunId, fileCount: _fileCount } = checkDatabase(dbPath)
     const detectedLanguages = detectLanguages(repoRoot, registry, plugins)

@@ -5,16 +5,18 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AnalyzerRegistryError, loadAnalyzerRegistrySafeFromPath, loadDefaultAnalyzerRegistry, parseAnalyzerRegistry, registryExtensionLanguages } from './analyzer-registry-loader'
 
-// code-spider-d12
+// code-spider-d12 code-spider-xof
 describe('loadAnalyzerRegistrySafeFromPath', () => {
-  test('falls back to an empty registry on malformed yaml and reports the error', () => {
+  test('falls back to the embedded built-in registry on malformed yaml and reports the error', () => {
     const dir = mkdtempSync(join(tmpdir(), 'code-spider-registry-'))
     try {
       const path = join(dir, 'analyzers.yaml')
       writeFileSync(path, 'languages:\n  - id: zig\n    nonsense_field: true\n')
       const result = loadAnalyzerRegistrySafeFromPath(path)
       expect(result.error).toContain('Unknown language field')
-      expect(result.registry.languages).toEqual([])
+      // code-spider-xof: fallback is the embedded default, not an empty registry
+      expect(result.registry.languages.length).toBeGreaterThan(0)
+      expect(result.registry.languages.some(language => language.id === 'typescript')).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -23,7 +25,7 @@ describe('loadAnalyzerRegistrySafeFromPath', () => {
   test('missing file falls back with an error, never throws', () => {
     const result = loadAnalyzerRegistrySafeFromPath('/nonexistent/analyzers.yaml')
     expect(result.error).toContain('not found')
-    expect(result.registry.languages).toEqual([])
+    expect(result.registry.languages.length).toBeGreaterThan(0)
   })
 
   test('valid file loads with no error', () => {
