@@ -42,7 +42,7 @@ The CLI entry point will be `src/index.ts`. The compiled binary is `code-spider`
 
 ## Architecture
 
-Code-Spider is a **pre-implementation** project. All design lives in `code-spider-prd-spec2.md` (primary technical spec). Architecture follows four layers:
+Code-Spider is implemented. Original design lives in `docs/code-spider-prd-spec2.md` (primary technical spec); the intelligence analyzer suite is specified in `docs/intelligence-suite-design.md`. Architecture follows four layers:
 
 ### Layer 1 — CLI Shell
 Parses commands, handles `--json` output mode, routes to services. Entry: `src/index.ts`.
@@ -93,6 +93,9 @@ code-spider
   atoms <unit-ref>
   investigate [start|add|pin|note|show]
   export report <node-ref|investigation-id> [--format md|json]
+  intelligence scan [--category <c>] [--format table|json|md|sarif]
+  intelligence cycles|unused|dupes|hotspots|arch
+  intelligence explain <finding-id>
 ```
 
 Every command supports `--json` (machine-readable output), `--repo <path>`, and `--db <path>`.

@@ -1,6 +1,6 @@
 ---
 name: code-spider-codex
-description: Use when Codex should inspect or investigate a repository with code-spider, especially for fast repo triage, hotspot discovery, semantic lookups, or curated context from markdown and git. Prefer this skill when the user wants command workflows, non-destructive inspection, or examples of how to use code-spider effectively from Codex.
+description: Use when Codex should inspect or investigate a repository with code-spider, especially for fast repo triage, hotspot discovery, semantic lookups, static-analysis audits (dead code, cycles, duplication via intelligence scan), or curated context from markdown and git. Prefer this skill when the user wants command workflows, non-destructive inspection, or examples of how to use code-spider effectively from Codex.
 ---
 
 # Code-Spider For Codex
@@ -41,6 +41,7 @@ code-spider doctor --repo /path/to/repo --db /tmp/repo-code-spider.db
 - `related`: nearby files based on symbols, flows, markdown, git co-change, and tracked work
 - `defs`, `refs`, `atoms`: semantic navigation when the selected language plugin and its analyzers support it
 - `doctor`: which plugins and analyzers are active for the repo and what the last semantic run actually achieved
+- `intelligence scan` (and `cycles`, `unused`, `dupes`, `hotspots`, `arch`): static-analysis findings — dead code, dependency cycles, duplication, risk hotspots, architecture-rule violations; `intelligence explain <finding-id>` shows the evidence
 
 ## High-signal workflows
 
@@ -86,6 +87,19 @@ Read `doctor` as two layers:
 - `Selected analyzers`: which concrete tools that plugin can use in the current environment
 
 If `doctor` shows `symbolNavigation: false` or `semanticRefs: false`, explain that the selected plugin path is unavailable, degraded, or returned no results.
+
+### 4. Audit for dead code, cycles, and duplication
+
+```bash
+code-spider intelligence scan --repo /path/to/repo --db /tmp/repo.db --format md
+code-spider intelligence explain <finding-id> --repo /path/to/repo --db /tmp/repo.db
+```
+
+Rules of engagement:
+- Quote fingerprints when referring to findings — they are stable across runs and line drift.
+- `confidence: low` on `unused-file` = only dynamically reachable. Say "possibly unused", never "dead".
+- `unused` requires `intelligence.entrypoints` in `.code-spider/config.yaml` (plus automatic inference from package.json bin/main, shebangs, route files); symbol-level rules additionally require `index --semantic`.
+- Treat absence of a finding as absence of evidence, not proof of health — reachability and symbol rules are budget- and analyzer-limited, and degrade soft.
 
 ## Config and hygiene
 

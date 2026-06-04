@@ -1,6 +1,6 @@
 ---
 name: code-spider-claude
-description: Use when Claude Code should work through a repository with code-spider, especially for investigation-style exploration, evidence-backed reading plans, or command recipes that combine repo structure, git history, markdown context, and semantic checks.
+description: Use when Claude Code should work through a repository with code-spider, especially for investigation-style exploration, evidence-backed reading plans, static-analysis audits (dead code, cycles, duplication, hotspots, architecture rules via intelligence scan), or command recipes that combine repo structure, git history, markdown context, and semantic checks.
 ---
 
 # Code-Spider For Claude Code
@@ -130,6 +130,32 @@ Use the output to explain:
 - what is documented nearby
 - what files tend to move together
 - what other units are probably part of the same subsystem
+
+### Audit a repo for dead code, cycles, and duplication
+
+```bash
+code-spider intelligence scan --repo /path/to/repo --db /tmp/repo.db
+code-spider intelligence scan --repo /path/to/repo --db /tmp/repo.db --format md   # report form
+code-spider intelligence explain <finding-id> --repo /path/to/repo --db /tmp/repo.db
+```
+
+Findings carry stable fingerprints (they survive line drift — quote them when
+tracking an issue across runs), a confidence level, and evidence via
+`explain`. Subcommands scope one family: `cycles`, `unused`, `dupes`,
+`hotspots`, `arch`.
+
+Interpretation rules:
+- `confidence: low` on `unused-file` means "only reachable through dynamic
+  imports" — report it as *possibly* unused, never as dead.
+- `unused` needs entrypoints: set `intelligence.entrypoints` in
+  `.code-spider/config.yaml` and re-index. Conventions (package.json
+  bin/main, shebang scripts, route files) are inferred automatically.
+- `unused-export`/`unused-symbol` only appear after `index --semantic` and
+  only for symbols whose references were actually LSP-queried — absence of a
+  finding is not proof of use.
+- Suppress accepted findings in config (`intelligence.suppressions`) rather
+  than ignoring them; expired or dead suppressions surface themselves as
+  `stale-suppression` findings.
 
 ### Check whether semantic mode is worth it
 

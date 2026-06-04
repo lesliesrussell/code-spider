@@ -2,7 +2,15 @@
 
 <!-- code-spider-qsb -->
 
-Status: design accepted, phased delivery below.
+Status: **implemented** (2026-06-04, ~23 beads; design accepted same day).
+All four phases shipped, plus discovered work the design assumed existed:
+unit-level import edge extraction (code-spider-89w), symbol_edges population
+via pooled LSP sessions (code-spider-0pi, code-spider-0pa), tested-by edges
+(code-spider-sgm), and symbol-level unused rules (code-spider-9cg). Two
+deltas from the text below: finding ids are run-scoped
+(`fnd_r<run>_<fingerprint>`) because fingerprints are stable across runs by
+design and collided with a global primary key, and a sixth finding category
+`suppressions` carries stale-suppression findings.
 Origin: adapted from a Fallow-inspired "intelligence plugin" spec, rewritten to fit
 code-spider's actual architecture. Fallow references: unused files/exports/deps,
 circular dependencies, duplication modes, complexity hotspots, architecture issues,
