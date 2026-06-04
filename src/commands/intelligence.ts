@@ -12,6 +12,8 @@ import type { Finding, FindingCategory, FindingFilter } from '../services/findin
 import { CycleAnalyzer } from '../services/cycles'
 // code-spider-cii
 import { ReachabilityAnalyzer } from '../services/reachability'
+// code-spider-c4l
+import { loadSuppressions, applySuppressions } from '../services/suppressions'
 
 const INTEL_USAGE = `code-spider intelligence <subcommand>
 
@@ -21,7 +23,7 @@ Subcommands:
   cycles                  Detect circular dependencies in the import graph
   unused                  Find files unreachable from configured entrypoints`
 
-const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture']
+const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions']
 
 // code-spider-q6b
 // Analyzers run fail-soft: one crashing records a warning and the rest of
@@ -90,6 +92,10 @@ export default async function run(ctx: CliContext): Promise<void> {
   // code-spider-cii
   if (sub === 'unused') filter.category = 'reachability'
   runAnalyzers(db, runId, filter.category)
+  // code-spider-c4l
+  // Suppressions evaluate against the fresh analyzer results; stale entries
+  // become findings themselves.
+  applySuppressions(db, runId, loadSuppressions(ctx.repoRoot))
 
   const findings = new FindingsStore(db, runId).list(filter)
   const byCategory: Record<string, number> = {}

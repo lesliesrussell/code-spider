@@ -6,7 +6,9 @@
 import { createHash } from 'node:crypto'
 import type { Database } from 'bun:sqlite'
 
-export type FindingCategory = 'reachability' | 'cycles' | 'duplication' | 'hotspots' | 'architecture'
+// code-spider-c4l: 'suppressions' carries stale-suppression findings —
+// suppression hygiene is itself analyzable.
+export type FindingCategory = 'reachability' | 'cycles' | 'duplication' | 'hotspots' | 'architecture' | 'suppressions'
 export type FindingSeverity = 'info' | 'warning' | 'error'
 export type FindingConfidence = 'low' | 'medium' | 'high'
 

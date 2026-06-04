@@ -1,6 +1,6 @@
 // code-spider-0ok
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { CliContext } from '../types'
@@ -149,6 +149,50 @@ describe('intelligence unused', () => {
     }
     expect(errors.join('\n')).toContain('entrypoint')
     expect(logs.lines.join('\n')).toContain('(no findings)')
+  })
+})
+
+// code-spider-c4l
+describe('suppressions in scan', () => {
+  test('config-suppressed findings vanish; stale entries surface', async () => {
+    const { ctx, dbPath } = makeIndexedRepo('intel-suppress')
+    const db = openDb(dbPath)
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, metadata_json) VALUES
+         (20, 1, 'unit', 'unit:src/main.ts', 'main.ts', 'src/main.ts', 'TypeScript', '{"entrypoint":true}'),
+         (21, 1, 'unit', 'unit:src/legacy/old.ts', 'old.ts', 'src/legacy/old.ts', 'TypeScript', NULL)`
+    ).run()
+    db.close()
+    mkdirSync(join(ctx.repoRoot, '.code-spider'), { recursive: true })
+    writeFileSync(
+      join(ctx.repoRoot, '.code-spider', 'config.yaml'),
+      `intelligence:
+  suppressions:
+    - rule: unused-file
+      path: "src/legacy/**"
+      expires: "2099-12-31"
+    - rule: circular-dependency
+      path: "src/never/**"
+`
+    )
+
+    ctx.json = true
+    ctx.args = ['scan']
+    const logs = captureLogs()
+    try {
+      await runIntelligence(ctx)
+    } finally {
+      logs.restore()
+    }
+    const out = JSON.parse(logs.lines.join('\n')) as {
+      findings: Array<{ ruleId: string; locations: Array<{ path: string }> }>
+    }
+    const rules = out.findings.map(f => f.ruleId)
+    expect(rules).not.toContain('unused-file') // suppressed
+    expect(rules).toContain('stale-suppression') // the never-matching entry
+    const stale = out.findings.filter(f => f.ruleId === 'stale-suppression')
+    expect(stale).toHaveLength(1)
+    expect(stale[0]!.locations[0]!.path).toBe('src/never/**')
   })
 })
 
