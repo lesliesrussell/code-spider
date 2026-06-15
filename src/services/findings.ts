@@ -8,7 +8,9 @@ import type { Database } from 'bun:sqlite'
 
 // code-spider-c4l: 'suppressions' carries stale-suppression findings —
 // suppression hygiene is itself analyzable.
-export type FindingCategory = 'reachability' | 'cycles' | 'duplication' | 'hotspots' | 'architecture' | 'suppressions'
+// code-spider-zox: 'correctness' carries C/C++ audit findings promoted from
+// clang-tidy / cppcheck diagnostics.
+export type FindingCategory = 'reachability' | 'cycles' | 'duplication' | 'hotspots' | 'architecture' | 'suppressions' | 'correctness'
 export type FindingSeverity = 'info' | 'warning' | 'error'
 export type FindingConfidence = 'low' | 'medium' | 'high'
 

@@ -24,6 +24,8 @@ import { ManifestAnalyzer } from '../services/manifest'
 import { ArchitectureAnalyzer, loadArchitectureOptions } from '../services/architecture'
 // code-spider-9cg
 import { SymbolUnusedAnalyzer } from '../services/symbol-unused'
+// code-spider-zox
+import { CAuditAnalyzer } from '../services/c-audit'
 // code-spider-773
 import { renderFindingsMarkdown } from '../services/findings-report'
 // code-spider-lif
@@ -34,7 +36,7 @@ const INTEL_USAGE = `code-spider intelligence <subcommand>
 Subcommands:
   scan [--category <c>] [--format table|json|md|sarif]
                           Run all intelligence analyzers and list findings
-                          (categories: reachability|cycles|duplication|hotspots|architecture)
+                          (categories: reachability|cycles|duplication|hotspots|architecture|correctness)
   cycles                  Detect circular dependencies in the import graph
   unused                  Find files unreachable from configured entrypoints
   dupes                   Detect duplicated files and regions (strict token match)
@@ -42,7 +44,7 @@ Subcommands:
   arch                    Check declared layer and boundary rules
   explain <finding-id>    Show a finding with its supporting evidence`
 
-const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions']
+const CATEGORIES: FindingCategory[] = ['reachability', 'cycles', 'duplication', 'hotspots', 'architecture', 'suppressions', 'correctness']
 
 // code-spider-q6b
 // Analyzers run fail-soft: one crashing records a warning and the rest of
@@ -101,6 +103,13 @@ const ANALYZERS: IntelAnalyzer[] = [
     name: 'hotspots',
     category: 'hotspots',
     run: (db, runId, repoRoot) => void new HotspotAnalyzer().analyze(db, runId, loadHotspotOptions(repoRoot)),
+  },
+  // code-spider-zox
+  // Promotes clang-tidy/cppcheck C/C++ diagnostics into correctness findings.
+  {
+    name: 'c-audit',
+    category: 'correctness',
+    run: (db, runId) => void new CAuditAnalyzer().analyze(db, runId),
   },
 ]
 
