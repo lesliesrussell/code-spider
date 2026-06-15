@@ -5,6 +5,8 @@ import { AnalyzerRunner } from './analyzer-runner'
 import { closeLspReferenceSessions } from '../adapters/lsp'
 // code-spider-bik
 import { debugLog } from '../utils/debug'
+// code-spider-ni6
+import { applyCrossLanguageReferences } from './cross-language-refs'
 
 export interface EnrichOptions {
   repoRoot: string
@@ -254,6 +256,18 @@ export class SemanticEnricher {
       symbolEdgesAdded = await this.populateSymbolEdges(db, runId, repoRoot)
     } finally {
       closeLspReferenceSessions()
+    }
+
+    // code-spider-ni6
+    // Per-language servers never see across the linker boundary, so a Zig
+    // `export fn` called only from C looks unreferenced. Match exported symbol
+    // names across language families and record the cross-refs the unused
+    // analyzers read. No LSP needed — pure DB + source scan over the symbols
+    // both passes already populated.
+    try {
+      symbolEdgesAdded += applyCrossLanguageReferences(db, runId, repoRoot)
+    } catch (err) {
+      debugLog('semantic-enricher', 'cross-language reference resolution failed', err)
     }
 
     return { filesProcessed: filesToProcess.length, filesSkipped, filesCarried, symbolsAdded, diagnosticsAdded, symbolEdgesAdded, analyzersRecorded, errors }
