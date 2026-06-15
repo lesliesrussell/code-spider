@@ -193,4 +193,25 @@ export const SCHEMA: string[] = [
 )`,
   `CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint)`,
   `CREATE INDEX IF NOT EXISTS idx_findings_run_rule ON findings(run_id, rule_id)`,
+  // code-spider-ab9
+  // Token-savings accounting. One row per code-spider command run while an
+  // investigation is active: ingested = source the answer rested on, emitted =
+  // stdout the cloud consumed.
+  `CREATE TABLE IF NOT EXISTS token_events (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES runs(id),
+  investigation_id INTEGER NOT NULL REFERENCES investigations(id),
+  command TEXT NOT NULL,
+  ingested INTEGER NOT NULL,
+  emitted INTEGER NOT NULL,
+  ts INTEGER NOT NULL
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_token_events_inv ON token_events(investigation_id)`,
+  // code-spider-ab9
+  // Tiny key/value store for CLI session state (currently: the active
+  // investigation id that command instrumentation attributes events to).
+  `CREATE TABLE IF NOT EXISTS app_state (
+  key TEXT PRIMARY KEY,
+  value TEXT
+)`,
 ]

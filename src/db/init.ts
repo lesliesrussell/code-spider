@@ -45,6 +45,11 @@ function migrateExistingTables(db: Database): void {
   if (!evidenceCols.some(c => c.name === 'finding_id')) {
     db.query('ALTER TABLE evidence ADD COLUMN finding_id TEXT').run()
   }
+  // code-spider-ab9
+  const runsCols = db.query('PRAGMA table_info(runs)').all() as Array<{ name: string }>
+  if (!runsCols.some(c => c.name === 'corpus_ingested_tokens')) {
+    db.query('ALTER TABLE runs ADD COLUMN corpus_ingested_tokens INTEGER').run()
+  }
 }
 
 export function openDb(dbPath: string): Database {
