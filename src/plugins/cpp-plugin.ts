@@ -1,11 +1,19 @@
 // code-spider-due
-import type { RegistryLanguage } from '../analyzer-registry'
+import { spawnSync } from 'node:child_process'
+import type { RegistryAnalyzer, RegistryLanguage } from '../analyzer-registry'
 import type {
   PluginCapabilityStatus,
   PluginDetectionResult,
+  PluginDiagnostic,
   PluginHealth,
 } from '../language-plugin'
 import { BaseRegistryPlugin, type PluginCapability } from './base-plugin'
+// code-spider-ua1
+import { buildClangTidyArgs, buildCppcheckArgs, findCompileDb, parseToolOutput } from './shared/cpp-quality'
+
+// clang-tidy / cppcheck can be slow on large translation units; allow more
+// headroom than the base 10s quality timeout.
+const CPP_QUALITY_TIMEOUT_MS = 60_000
 
 type SupportedLanguageId = 'c' | 'cpp'
 
@@ -21,6 +29,38 @@ export class CppPlugin extends BaseRegistryPlugin {
 
   protected matchesLanguage(language: RegistryLanguage): boolean {
     return this.languageIds.includes(language.id as SupportedLanguageId)
+  }
+
+  // code-spider-ua1
+  // The base quality path collapses any non-zero exit into a single blob
+  // diagnostic. clang-tidy and cppcheck carry per-finding location/severity/
+  // check-name we want preserved, so route them through the structured
+  // parsers. A compile_commands.json (when present) sharpens clang-tidy.
+  protected override executeQualityAnalyzer(
+    analyzer: RegistryAnalyzer,
+    filePath: string,
+    repoRoot: string,
+    _languageId: string,
+  ): { diagnostics: PluginDiagnostic[]; error?: string } {
+    const tool = analyzer.tool
+    if (tool !== 'clang-tidy' && tool !== 'cppcheck') {
+      return super.executeQualityAnalyzer(analyzer, filePath, repoRoot, _languageId)
+    }
+
+    const args = tool === 'clang-tidy'
+      ? buildClangTidyArgs(filePath, findCompileDb(repoRoot))
+      : buildCppcheckArgs(filePath)
+
+    const result = spawnSync(tool, args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: CPP_QUALITY_TIMEOUT_MS,
+    })
+    if (result.error) return { diagnostics: [], error: result.error.message }
+
+    // Non-zero exit is normal for these tools when findings exist — parse the
+    // output regardless of status.
+    return { diagnostics: parseToolOutput(tool, result.stdout ?? '', result.stderr ?? '') }
   }
 
   detect(repoRoot: string, filePath: string): PluginDetectionResult {
