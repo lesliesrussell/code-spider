@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { recordIngested, recordIngestedNodes, getIngested, resetLedger } from './token-ledger'
+import { recordIngested, recordIngestedNodes, recordIngestedAllUnits, getIngested, resetLedger } from './token-ledger'
 
 function seed(): Database {
   const db = new Database(':memory:')
@@ -42,5 +42,12 @@ describe('TokenLedger', () => {
     recordIngestedNodes(db, 1, [])
     recordIngestedNodes(db, 1, ['unit:missing.ts'])
     expect(getIngested()).toBe(0)
+  })
+
+  test('sums tokens across all unit nodes in the run', () => {
+    resetLedger()
+    const db = seed()
+    recordIngestedAllUnits(db, 1)
+    expect(getIngested()).toBe(150)
   })
 })
