@@ -81,10 +81,38 @@ describe('analyzer registry loader', () => {
       'go',
       'rust',
       'zig',
+      'c',
+      'cpp',
     ])
     expect(
       registry.languages.find(language => language.id === 'zig')?.analyzers.map(analyzer => analyzer.id)
     ).toEqual(['zls', 'zig-ast-check'])
+  })
+
+  // code-spider-6q9
+  test('exposes c and cpp with the clangd/clang-tidy/cppcheck/heuristic analyzer set', () => {
+    const registry = loadDefaultAnalyzerRegistry()
+    const c = registry.languages.find(language => language.id === 'c')
+    const cpp = registry.languages.find(language => language.id === 'cpp')
+
+    expect(c?.detect.extensions).toContain('.c')
+    expect(c?.detect.extensions).toContain('.h')
+    expect(c?.analyzers.map(analyzer => analyzer.id)).toEqual([
+      'clangd-lsp',
+      'clang-tidy',
+      'cppcheck',
+      'cpp-heuristic',
+    ])
+
+    expect(cpp?.detect.extensions).toContain('.cpp')
+    expect(cpp?.detect.extensions).toContain('.hpp')
+    expect(cpp?.aliases).toContain('c++')
+    expect(cpp?.analyzers.map(analyzer => analyzer.id)).toEqual([
+      'clangd-lsp',
+      'clang-tidy',
+      'cppcheck',
+      'cpp-heuristic',
+    ])
   })
 
   test('rejects duplicate language ids', () => {

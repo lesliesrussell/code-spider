@@ -213,3 +213,127 @@ languages:
           - diagnostics
         priority: 50
         notes: File-scoped fallback when zls is unavailable.
+
+  - id: c
+    display_name: C
+    detect:
+      extensions:
+        - .c
+        - .h
+      manifests:
+        - compile_commands.json
+        - CMakeLists.txt
+        - Makefile
+        - meson.build
+        - configure.ac
+    analyzers:
+      - id: clangd-lsp
+        kind: lsp
+        tool: clangd
+        command:
+          - clangd
+          - --background-index=false
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+        notes: Most accurate with a compile_commands.json compile database.
+      - id: clang-tidy
+        kind: quality
+        tool: clang-tidy
+        command:
+          - clang-tidy
+          - "{file}"
+          - --quiet
+        capabilities:
+          - diagnostics
+        priority: 60
+        notes: Deep correctness checks; the plugin injects -p when a compile database is found.
+      - id: cppcheck
+        kind: quality
+        tool: cppcheck
+        command:
+          - cppcheck
+          - "{file}"
+        capabilities:
+          - diagnostics
+        priority: 40
+        notes: Degradation floor; needs no compile database. The plugin adds template/enable flags.
+      - id: cpp-heuristic
+        kind: heuristic
+        tool: builtin
+        command:
+          - heuristic-symbols
+        capabilities:
+          - symbols
+        priority: 10
+        notes: Built-in fallback symbol extraction for C when clangd is unavailable.
+
+  - id: cpp
+    display_name: C++
+    aliases:
+      - c++
+      - cc
+      - cxx
+    detect:
+      extensions:
+        - .cpp
+        - .cc
+        - .cxx
+        - .c++
+        - .hpp
+        - .hh
+        - .hxx
+        - .h++
+      manifests:
+        - compile_commands.json
+        - CMakeLists.txt
+        - Makefile
+        - meson.build
+        - configure.ac
+    analyzers:
+      - id: clangd-lsp
+        kind: lsp
+        tool: clangd
+        command:
+          - clangd
+          - --background-index=false
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+        notes: Most accurate with a compile_commands.json compile database.
+      - id: clang-tidy
+        kind: quality
+        tool: clang-tidy
+        command:
+          - clang-tidy
+          - "{file}"
+          - --quiet
+        capabilities:
+          - diagnostics
+        priority: 60
+        notes: Deep correctness checks; the plugin injects -p when a compile database is found.
+      - id: cppcheck
+        kind: quality
+        tool: cppcheck
+        command:
+          - cppcheck
+          - "{file}"
+        capabilities:
+          - diagnostics
+        priority: 40
+        notes: Degradation floor; needs no compile database. The plugin adds template/enable flags.
+      - id: cpp-heuristic
+        kind: heuristic
+        tool: builtin
+        command:
+          - heuristic-symbols
+        capabilities:
+          - symbols
+        priority: 10
+        notes: Built-in fallback symbol extraction for C++ when clangd is unavailable.
