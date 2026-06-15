@@ -115,6 +115,20 @@ describe('analyzer registry loader', () => {
     ])
   })
 
+  // code-spider-ua1: clangd owns symbols/defs/refs only — clang-tidy is the
+  // primary diagnostics provider, so the base getDiagnostics (first-success-
+  // wins by priority) reaches the deep audit instead of stopping at clangd.
+  test('clangd does not claim diagnostics for c/cpp; clang-tidy does', () => {
+    const registry = loadDefaultAnalyzerRegistry()
+    for (const id of ['c', 'cpp']) {
+      const language = registry.languages.find(l => l.id === id)
+      const clangd = language?.analyzers.find(a => a.id === 'clangd-lsp')
+      const clangTidy = language?.analyzers.find(a => a.id === 'clang-tidy')
+      expect(clangd?.capabilities).toEqual(['symbols', 'defs', 'refs'])
+      expect(clangTidy?.capabilities).toContain('diagnostics')
+    }
+  })
+
   test('rejects duplicate language ids', () => {
     const invalid = `
 version: 1

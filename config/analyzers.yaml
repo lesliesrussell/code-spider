@@ -237,9 +237,8 @@ languages:
           - symbols
           - defs
           - refs
-          - diagnostics
         priority: 100
-        notes: Most accurate with a compile_commands.json compile database.
+        notes: Owns graph symbols/defs/refs; clang-tidy is the diagnostics provider.
       - id: clang-tidy
         kind: quality
         tool: clang-tidy
@@ -304,9 +303,8 @@ languages:
           - symbols
           - defs
           - refs
-          - diagnostics
         priority: 100
-        notes: Most accurate with a compile_commands.json compile database.
+        notes: Owns graph symbols/defs/refs; clang-tidy is the diagnostics provider.
       - id: clang-tidy
         kind: quality
         tool: clang-tidy
