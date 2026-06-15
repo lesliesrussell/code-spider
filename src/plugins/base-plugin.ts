@@ -130,7 +130,9 @@ export abstract class BaseRegistryPlugin implements LanguagePlugin {
         }
 
         if (this.supportsHeuristicSymbols && candidate.analyzer.kind === 'heuristic') {
-          const symbols = heuristicSymbols(readFileSync(ctx.filePath, 'utf8'))
+          // code-spider-z3j: pass the language so the extractor uses the
+          // matching pattern set (C/C++ vs the generic TS/JS-shaped default).
+          const symbols = heuristicSymbols(readFileSync(ctx.filePath, 'utf8'), ctx.languageId)
           attempts.push({
             analyzerId: candidate.analyzer.id,
             analyzerKind: 'heuristic',
