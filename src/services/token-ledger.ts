@@ -22,7 +22,7 @@ export function getIngested(): number {
 export function recordIngestedNodes(db: Database, runId: number, nodeKeys: string[]): void {
   if (nodeKeys.length === 0) return
   const placeholders = nodeKeys.map(() => '?').join(',')
-  const rows = db.query<{ value: number }, unknown[]>(
+  const rows = db.query<{ value: number }, (number | string)[]>(
     `SELECT s.value FROM stats s
        JOIN nodes n ON n.id = s.node_id
       WHERE s.run_id = ? AND s.metric = 'tokens' AND n.run_id = ? AND n.key IN (${placeholders})`
