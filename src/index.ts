@@ -2,6 +2,12 @@
 
 import { resolve } from 'node:path'
 import type { CliContext } from './types'
+// code-spider-ab9
+import { existsSync } from 'node:fs'
+import { openDb } from './db/init'
+import { Navigator } from './services/navigator'
+import { resetLedger } from './services/token-ledger'
+import { recordCommandEvent } from './services/record-event'
 
 // code-spider-vo4
 // USAGE documents exactly the flags each command parses today — nothing
@@ -107,7 +113,26 @@ async function main(): Promise<void> {
   // Remove command from positional args
   ctx.args = ctx.args.slice(1)
 
-  switch (command) {
+  // code-spider-ab9
+  // Token-savings instrumentation: tee stdout to measure what the cloud
+  // consumed (emitted), then — for work commands only — persist an event when an
+  // investigation is active. `investigate`/`export` are excluded so the savings
+  // report itself doesn't pollute the thread it summarizes. We never CREATE a db
+  // just to record: if no index exists yet, there is nothing to attribute.
+  const RECORDING_EXCLUDED = new Set(['investigate', 'export'])
+  const instrument = command !== undefined && !RECORDING_EXCLUDED.has(command)
+  const origLog = console.log
+  let captured = ''
+  if (instrument) {
+    resetLedger()
+    console.log = (...as: unknown[]): void => {
+      captured += as.map(a => (typeof a === 'string' ? a : String(a))).join(' ') + '\n'
+      origLog(...(as as []))
+    }
+  }
+
+  try {
+    switch (command) {
     case 'doctor': {
       const mod = await import('./commands/doctor')
       await mod.default(ctx)
@@ -193,6 +218,20 @@ async function main(): Promise<void> {
     default: {
       console.log(USAGE)
       process.exit(1)
+    }
+    }
+  } finally {
+    if (instrument) {
+      console.log = origLog
+      try {
+        if (existsSync(ctx.dbPath)) {
+          const db = openDb(ctx.dbPath)
+          const runId = Navigator.latestRunId(db, ctx.repoRoot)
+          if (runId !== null) recordCommandEvent(db, runId, command as string, captured)
+        }
+      } catch {
+        // Accounting must never break a command. Fail soft.
+      }
     }
   }
 }
