@@ -5,6 +5,8 @@ import type { LanguagePlugin } from './language-plugin'
 import { RegistryLegacyPlugin } from './plugins/registry-legacy-plugin'
 import { TypeScriptJavaScriptPlugin } from './plugins/typescript-javascript-plugin'
 import { ZigPlugin } from './plugins/zig-plugin'
+// code-spider-due
+import { CppPlugin } from './plugins/cpp-plugin'
 
 export interface DetectedPluginLanguage {
   languageId: string
@@ -27,6 +29,8 @@ export class BuiltinLanguagePluginRegistry {
     this.plugins = [
       new TypeScriptJavaScriptPlugin(registry, commandExists, lsp),
       new ZigPlugin(registry, commandExists, lsp),
+      // code-spider-due
+      new CppPlugin(registry, commandExists, lsp),
     ]
     this.legacyPlugin = new RegistryLegacyPlugin(
       registry,
