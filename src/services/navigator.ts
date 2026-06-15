@@ -18,6 +18,7 @@ export interface NodeStats {
   loc: number
   churn: number
   recency: number  // days since last commit (999 = unknown)
+  tokens: number   // code-spider-ab9: estimated token-size of this node's source
 }
 
 export interface RiskSignals {
@@ -106,13 +107,14 @@ export class Navigator {
       'SELECT metric, value FROM stats WHERE run_id=? AND node_id=?'
     ).all(this.runId, nodeId)
 
-    let loc = 0, churn = 0, recency = 999
+    let loc = 0, churn = 0, recency = 999, tokens = 0
     for (const row of rows) {
       if (row.metric === 'loc') loc = row.value
       else if (row.metric === 'churn') churn = row.value
       else if (row.metric === 'recency') recency = row.value
+      else if (row.metric === 'tokens') tokens = row.value  // code-spider-ab9
     }
-    return { loc, churn, recency }
+    return { loc, churn, recency, tokens }
   }
 
   getEvidence(nodeId: number, limit = 5): EvidenceRow[] {

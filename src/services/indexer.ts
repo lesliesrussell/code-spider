@@ -10,6 +10,8 @@ import { loadDefaultAnalyzerRegistrySafe, registryExtensionLanguages } from '../
 import { MarkdownContextIndexer } from './markdown-context'
 // code-spider-89w
 import { scanUnitImports } from './import-edges'
+// code-spider-ab9
+import { tokensFromBytes } from './token-counter'
 // code-spider-0fy
 import { loadEntrypointGlobs, isEntrypoint } from './entrypoints'
 // code-spider-hma
@@ -256,6 +258,8 @@ export class Indexer {
       insertStat.run(runId, nodeId, 'loc', stats.loc)
       insertStat.run(runId, nodeId, 'churn', stats.churn)
       insertStat.run(runId, nodeId, 'recency', stats.recencyDays)
+      // code-spider-ab9
+      insertStat.run(runId, nodeId, 'tokens', tokensFromBytes(file.sizeBytes, 'code'))
     }
 
     // 8. Insert zone stats (aggregate LOC and max churn from children)
@@ -421,6 +425,14 @@ export class Indexer {
     // 14. Mark run as complete
     const completedAt = new Date().toISOString()
     db.prepare('UPDATE runs SET completed_at=? WHERE id=?').run(completedAt, runId)
+
+    // code-spider-ab9
+    // Lifetime corpus meter: total source tokens code-spider digested this run.
+    const corpusRow = db.query<{ total: number | null }, [number]>(
+      "SELECT SUM(value) AS total FROM stats WHERE run_id=? AND metric='tokens'"
+    ).get(runId)
+    db.query('UPDATE runs SET corpus_ingested_tokens=? WHERE id=?')
+      .run(Math.round(corpusRow?.total ?? 0), runId)
 
     const durationMs = Date.now() - startTime
 
