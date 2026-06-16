@@ -3,8 +3,27 @@ import { GitAdapter } from '../adapters/git'
 import { FlowDetector } from './flow-detector'
 import { Navigator } from './navigator'
 import { InvestigationService } from './investigation'
+// code-spider-ab9
+import { TokenSavingsService } from './token-savings'
+import type { InvestigationSavings } from './token-savings'
 
 export type ExportFormat = 'md' | 'json'
+
+// code-spider-ab9
+export function renderTokenSavingsMd(s: InvestigationSavings): string {
+  if (s.commandCount === 0) return ''
+  return [
+    '## Token Savings',
+    '',
+    `- **Saved:** ~${s.saved.toLocaleString()} tokens across ${s.commandCount} commands`,
+    `- **Ingested locally:** ~${s.ingested.toLocaleString()} tokens`,
+    `- **Sent to cloud:** ~${s.emitted.toLocaleString()} tokens`,
+    `- **Naive ceiling (whole-repo read):** ~${s.naiveCeiling.toLocaleString()} tokens`,
+    '',
+    '_Estimate — a confidence booster, not an audit._',
+    '',
+  ].join('\n')
+}
 
 interface SymbolRow {
   name: string
@@ -278,8 +297,11 @@ export class Exporter {
     const detail = this.invSvc.showWithContext(investigationId)
     const freshness = await this.getFreshness()
 
+    // code-spider-ab9
+    const savings = new TokenSavingsService(this.db).forInvestigation(investigationId)
+
     if (format === 'json') {
-      return JSON.stringify({ ...detail, freshness }, null, 2)
+      return JSON.stringify({ ...detail, freshness, savings }, null, 2)
     }
 
     // Markdown
@@ -359,6 +381,9 @@ export class Exporter {
       lines.push('*No nodes added yet.*')
       lines.push('')
     }
+
+    // code-spider-ab9
+    lines.push(renderTokenSavingsMd(savings))
 
     return lines.join('\n')
   }
