@@ -3,6 +3,8 @@ import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 // code-spider-u97
 import { SemanticQueryService } from '../services/semantic-query'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 
 function formatRecency(recency: number): string {
   if (recency > 900) return 'unknown'
@@ -40,6 +42,8 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   const stats = nav.getStats(node.id)
   const children = nav.getChildren(nodeRef, 'score', 5)
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, [node.key, ...children.map(c => c.key)])
   const evidence = nav.getEvidence(node.id, showAllEvidence ? 100 : 5)
   // code-spider-u97
   const atoms = includeSemantic && node.kind === 'unit'

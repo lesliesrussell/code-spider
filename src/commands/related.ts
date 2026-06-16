@@ -2,6 +2,8 @@ import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { RelatedService } from '../services/related'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 
 export default async function run(ctx: CliContext): Promise<void> {
   const nodeRef = ctx.args[0]
@@ -40,6 +42,8 @@ export default async function run(ctx: CliContext): Promise<void> {
   const related = kind === undefined
     ? allRelated
     : allRelated.filter(item => item.signals.includes(kind))
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, related.map(item => item.key))
 
   if (ctx.json) {
     console.log(JSON.stringify(related, null, 2))

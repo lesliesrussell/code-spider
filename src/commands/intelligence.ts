@@ -28,6 +28,8 @@ import { SymbolUnusedAnalyzer } from '../services/symbol-unused'
 import { CAuditAnalyzer } from '../services/c-audit'
 // code-spider-773
 import { renderFindingsMarkdown } from '../services/findings-report'
+// code-spider-ab9
+import { recordIngestedAllUnits } from '../services/token-ledger'
 // code-spider-lif
 import { renderFindingsSarif } from '../services/findings-sarif'
 
@@ -150,6 +152,9 @@ export default async function run(ctx: CliContext): Promise<void> {
     explainFinding(db, runId, ctx)
     return
   }
+
+  // code-spider-ab9
+  if (sub === 'scan') recordIngestedAllUnits(db, runId)
 
   const filter: FindingFilter = {}
   const categoryFlag = ctx.flags['category']

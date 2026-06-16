@@ -3,6 +3,8 @@ import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { SemanticQueryService } from '../services/semantic-query'
 import { AnalyzerRunner } from '../services/analyzer-runner'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 import { resolve, relative } from 'node:path'
 
 interface ReferenceOutput {
@@ -55,6 +57,9 @@ export default async function run(ctx: CliContext): Promise<void> {
     console.log(`No definitions found for ${symbol}`)
     return
   }
+
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, definitions.map(d => d.nodeKey))
 
   const runner = new AnalyzerRunner()
   const references: Array<{

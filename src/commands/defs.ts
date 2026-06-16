@@ -3,6 +3,8 @@ import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { SemanticQueryService } from '../services/semantic-query'
 import { AnalyzerRunner } from '../services/analyzer-runner'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 import { resolve, relative } from 'node:path'
 
 interface DefinitionOutput {
@@ -40,6 +42,8 @@ export default async function run(ctx: CliContext): Promise<void> {
   const query = new SemanticQueryService(db, runId)
   const indexedMatches = query.findDefinitions(symbol)
   const definitions = query.findReferenceSeedDefinitions(symbol)
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, [...indexedMatches.map(m => m.nodeKey), ...definitions.map(d => d.nodeKey)])
   const runner = new AnalyzerRunner()
   const semanticMatches: DefinitionOutput['matches'] = []
   const errors: string[] = []

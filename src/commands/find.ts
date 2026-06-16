@@ -5,6 +5,8 @@ import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { EmbeddingService } from '../services/embeddings'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 
 export default async function run(ctx: CliContext): Promise<void> {
   const query = ctx.args.join(' ').trim()
@@ -35,6 +37,9 @@ export default async function run(ctx: CliContext): Promise<void> {
     console.error('Check: code-spider doctor')
     process.exit(1)
   }
+
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, matches.map(m => m.key))
 
   if (ctx.json) {
     console.log(JSON.stringify({ query, matches }, null, 2))

@@ -1,6 +1,8 @@
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 
 export default async function run(ctx: CliContext): Promise<void> {
   const nodeRef = ctx.args[0]
@@ -28,6 +30,8 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   const nav = new Navigator(db, runId)
   const children = nav.getChildren(nodeRef, sortBy, limit)
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, children.map(c => c.key))
 
   if (ctx.json) {
     const result = children.map(c => {

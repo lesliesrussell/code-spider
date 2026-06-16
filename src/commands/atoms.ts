@@ -2,6 +2,8 @@ import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { SemanticQueryService } from '../services/semantic-query'
+// code-spider-ab9
+import { recordIngestedNodes } from '../services/token-ledger'
 
 export default async function run(ctx: CliContext): Promise<void> {
   const unitRef = ctx.args[0]
@@ -25,6 +27,8 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   const atoms = new SemanticQueryService(db, runId).findAtoms(unitRef)
+  // code-spider-ab9
+  recordIngestedNodes(db, runId, [node.key])
 
   if (ctx.json) {
     console.log(JSON.stringify(atoms, null, 2))
