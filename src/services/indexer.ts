@@ -270,6 +270,8 @@ export class Indexer {
 
       let zoneLoc = 0
       let zoneMaxChurn = 0
+      // code-spider-ab9
+      let zoneTokens = 0
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         if (file === undefined) continue
@@ -279,11 +281,15 @@ export class Indexer {
         if (file.relPath.startsWith(zone.name + '/')) {
           zoneLoc += stats.loc
           if (stats.churn > zoneMaxChurn) zoneMaxChurn = stats.churn
+          // code-spider-ab9
+          zoneTokens += tokensFromBytes(file.sizeBytes, 'code')
         }
       }
 
       insertStat.run(runId, zoneNodeId, 'loc', zoneLoc)
       insertStat.run(runId, zoneNodeId, 'churn', zoneMaxChurn)
+      // code-spider-ab9
+      insertStat.run(runId, zoneNodeId, 'tokens', zoneTokens)
     }
 
     // 9. Insert evidence for detected manifests
@@ -428,11 +434,22 @@ export class Indexer {
 
     // code-spider-ab9
     // Lifetime corpus meter: total source tokens code-spider digested this run.
+    // Scope to unit nodes so the newly-added zone/repo token rollups don't
+    // double-count against the corpus total.
     const corpusRow = db.query<{ total: number | null }, [number]>(
-      "SELECT SUM(value) AS total FROM stats WHERE run_id=? AND metric='tokens'"
+      `SELECT SUM(s.value) AS total FROM stats s
+       JOIN nodes n ON n.id = s.node_id
+       WHERE s.run_id=? AND s.metric='tokens' AND n.kind='unit'`
     ).get(runId)
+    const corpusTotal = Math.round(corpusRow?.total ?? 0)
     db.query('UPDATE runs SET corpus_ingested_tokens=? WHERE id=?')
-      .run(Math.round(corpusRow?.total ?? 0), runId)
+      .run(corpusTotal, runId)
+    // code-spider-ab9
+    // Give the repo node a token rollup equal to the corpus total so
+    // navigation commands returning the repo node report a real `ingested`.
+    if (repoNodeId !== null) {
+      insertStat.run(runId, repoNodeId, 'tokens', corpusTotal)
+    }
 
     const durationMs = Date.now() - startTime
 

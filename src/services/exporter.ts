@@ -11,7 +11,7 @@ export type ExportFormat = 'md' | 'json'
 
 // code-spider-ab9
 export function renderTokenSavingsMd(s: InvestigationSavings): string {
-  if (s.commandCount === 0) return ''
+  if (s.saved <= 0) return ''
   return [
     '## Token Savings',
     '',

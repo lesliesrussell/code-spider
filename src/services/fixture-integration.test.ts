@@ -204,6 +204,38 @@ describe('fixture-backed semantic integration', () => {
     expect(coverageRows.some(row => row.capability === 'symbols' && row.status === 'success')).toBe(true)
   })
 
+  // code-spider-ab9
+  test('attributes token rollups to zone and repo nodes at index time', async () => {
+    // typescript-cross-file has 3 files under src/, so detectZones emits a `src` zone.
+    const repoRoot = copyFixture('typescript-cross-file')
+    const dbPath = join(repoRoot, '.code-spider', 'index.db')
+
+    const indexResult = await new Indexer().run({ repoRoot, dbPath })
+    const db = openDb(dbPath)
+
+    // A zone node should carry a positive token rollup.
+    const zoneTokens = db.query<{ value: number }, [number]>(
+      `SELECT s.value AS value
+       FROM stats s JOIN nodes n ON n.id = s.node_id
+       WHERE s.run_id=? AND n.kind='zone' AND s.metric='tokens'
+       ORDER BY s.value DESC`
+    ).all(indexResult.runId)
+    expect(zoneTokens.length).toBeGreaterThan(0)
+    expect(zoneTokens[0]?.value).toBeGreaterThan(0)
+
+    // The repo node's token rollup must equal the run's corpus_ingested_tokens.
+    const repoTokens = db.query<{ value: number }, [number]>(
+      `SELECT s.value AS value
+       FROM stats s JOIN nodes n ON n.id = s.node_id
+       WHERE s.run_id=? AND n.kind='repo' AND s.metric='tokens'`
+    ).get(indexResult.runId)
+    const runRow = db.query<{ corpus_ingested_tokens: number | null }, [number]>(
+      'SELECT corpus_ingested_tokens FROM runs WHERE id=?'
+    ).get(indexResult.runId)
+    expect(repoTokens?.value).toBeGreaterThan(0)
+    expect(repoTokens?.value).toBe(runRow?.corpus_ingested_tokens ?? -1)
+  })
+
   test('detects Zig fixture files and manifests as Zig instead of Other', async () => {
     const repoRoot = copyFixture('zig-mini')
     const dbPath = join(repoRoot, '.code-spider', 'index.db')

@@ -132,7 +132,7 @@ export default async function run(ctx: CliContext): Promise<void> {
     }
     // code-spider-ab9
     const savings = new TokenSavingsService(db).forInvestigation(id)
-    if (savings.commandCount > 0) {
+    if (savings.saved > 0) {
       console.log('Token Savings')
       console.log(`  Saved ~${savings.saved.toLocaleString()} tokens across ${savings.commandCount} commands`)
       console.log(`  (ingested ~${savings.ingested.toLocaleString()} · sent ~${savings.emitted.toLocaleString()})`)
