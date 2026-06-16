@@ -45,6 +45,7 @@ Commands:
                                        Pin an evidence row (ids in show output)
   investigate note <inv-id> <text>     Add a note to an investigation
   investigate show <inv-id>            Show an investigation
+  investigate end                      Stop attributing commands to an investigation
   export report <node-ref|inv-id> [--format md|json]
                                        Export a report
   intelligence scan [--category <c>]   Run intelligence analyzers, list findings

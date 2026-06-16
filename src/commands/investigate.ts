@@ -2,6 +2,9 @@ import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
 import { InvestigationService } from '../services/investigation'
+// code-spider-ab9
+import { setActiveInvestigation, clearActiveInvestigation } from '../services/app-state'
+import { TokenSavingsService } from '../services/token-savings'
 
 export default async function run(ctx: CliContext): Promise<void> {
   const db = openDb(ctx.dbPath)
@@ -37,12 +40,22 @@ export default async function run(ctx: CliContext): Promise<void> {
     }
     const runId = Navigator.latestRunId(db, ctx.repoRoot) ?? undefined
     const id = svc.start(question, runId)
+    // code-spider-ab9
+    setActiveInvestigation(db, id)
     if (ctx.json) {
       console.log(JSON.stringify({ id, question }))
     } else {
       console.log(`Investigation #${id} started`)
       console.log(`  ${question}`)
     }
+    return
+  }
+
+  // code-spider-ab9
+  if (subcommand === 'end') {
+    clearActiveInvestigation(db)
+    if (ctx.json) console.log(JSON.stringify({ active: null }))
+    else console.log('Investigation tracking ended.')
     return
   }
 
@@ -62,7 +75,9 @@ export default async function run(ctx: CliContext): Promise<void> {
     }
 
     if (ctx.json) {
-      console.log(JSON.stringify(detail, null, 2))
+      // code-spider-ab9
+      const savings = new TokenSavingsService(db).forInvestigation(id)
+      console.log(JSON.stringify({ ...detail, savings }, null, 2))
       return
     }
 
@@ -114,6 +129,15 @@ export default async function run(ctx: CliContext): Promise<void> {
       console.log()
     } else {
       console.log('  (no nodes added yet)')
+    }
+    // code-spider-ab9
+    const savings = new TokenSavingsService(db).forInvestigation(id)
+    if (savings.commandCount > 0) {
+      console.log('Token Savings')
+      console.log(`  Saved ~${savings.saved.toLocaleString()} tokens across ${savings.commandCount} commands`)
+      console.log(`  (ingested ~${savings.ingested.toLocaleString()} · sent ~${savings.emitted.toLocaleString()})`)
+      console.log(`  Naive ceiling (whole-repo read): ~${savings.naiveCeiling.toLocaleString()} tokens`)
+      console.log()
     }
     return
   }
@@ -198,6 +222,6 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   console.error(`Unknown subcommand: ${subcommand}`)
-  console.error('Available: start, add, pin, note, show, (none = list)')
+  console.error('Available: start, add, pin, note, show, end, (none = list)')
   process.exit(1)
 }
