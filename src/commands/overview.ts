@@ -1,6 +1,8 @@
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { Navigator } from '../services/navigator'
+// code-spider-ab9
+import { TokenSavingsService } from '../services/token-savings'
 
 function pad(s: string, n: number): string {
   return s.padEnd(n)
@@ -50,6 +52,9 @@ export default async function run(ctx: CliContext): Promise<void> {
   const commit = runInfo?.repo_commit ? runInfo.repo_commit.slice(0, 7) : 'unknown'
   const dateStr = runInfo?.started_at ? runInfo.started_at.slice(0, 10) : ''
 
+  // code-spider-ab9
+  const corpusTotal = new TokenSavingsService(db).corpusTotal()
+
   if (ctx.json) {
     const zonesJson = zones.map(z => {
       const zoneName = z.key.slice('zone:'.length)
@@ -73,6 +78,7 @@ export default async function run(ctx: CliContext): Promise<void> {
       zones: zonesJson,
       topFiles: topFilesJson,
       manifests,
+      corpusIngestedTokens: corpusTotal,
     }, null, 2))
     return
   }
@@ -118,5 +124,10 @@ export default async function run(ctx: CliContext): Promise<void> {
       console.log(`  ${m.source}${snip}`)
     }
     console.log()
+  }
+
+  // code-spider-ab9
+  if (corpusTotal > 0) {
+    console.log(`  Corpus digested: ~${corpusTotal.toLocaleString()} tokens (held locally, never sent to the cloud)`)
   }
 }
