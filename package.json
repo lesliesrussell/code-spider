@@ -6,6 +6,8 @@
   "bin": { "code-spider": "src/index.ts" },
   "type": "module",
   "private": false,
+  "license": "MIT",
+  "author": "Leslie Russell",
   "files": [
     "config",
     "src",
