@@ -75,6 +75,22 @@ function scanTypeOnlyImports(source: string): string[] {
   return specifiers
 }
 
+// code-spider-e32
+const SHELL_EXTENSIONS = new Set(['.sh', '.bash', '.zsh'])
+
+function scanShellSpecifiers(source: string): string[] {
+  // Matches: optional leading whitespace, then 'source' or '.', then whitespace, then a path.
+  // ^\s* in /gm mode anchors to line start — '#' at line start prevents match.
+  const re = /^\s*(?:source|\.)\s+(['"]?)([^\s'"#]+)\1/gm
+  const specifiers: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = re.exec(source)) !== null) {
+    const spec = match[2]
+    if (spec !== undefined) specifiers.push(spec)
+  }
+  return specifiers
+}
+
 // code-spider-ty9
 // Shared specifier extraction: shebang-tolerant, type-only-supplemented,
 // fail-soft. Returns every import specifier (relative AND bare) so both the
@@ -83,6 +99,19 @@ export async function scanFileSpecifiers(
   repoRoot: string,
   relPath: string
 ): Promise<Array<{ path: string; kind: string }>> {
+  // code-spider-e32: shell source/. imports
+  const dot = relPath.lastIndexOf('.')
+  const ext = dot !== -1 ? relPath.slice(dot) : ''
+  if (SHELL_EXTENSIONS.has(ext)) {
+    try {
+      const source = await Bun.file(join(repoRoot, relPath)).text()
+      return scanShellSpecifiers(source).map(path => ({ path, kind: 'import-statement' }))
+    } catch (err) {
+      debugLog('import-edges', `shell scan failed for ${relPath}`, err)
+      return []
+    }
+  }
+
   const loader = loaderFor(relPath)
   if (loader === undefined) return []
   try {

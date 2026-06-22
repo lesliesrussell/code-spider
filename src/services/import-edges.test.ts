@@ -149,3 +149,51 @@ describe('Indexer import edges', () => {
     ])
   })
 })
+
+// code-spider-e32
+describe('scanUnitImports (shell)', () => {
+  test('resolves source ./path.sh imports', async () => {
+    const root = makeRepo({
+      'scripts/deploy.sh': 'source ./lib.sh\necho "deploying"',
+      'scripts/lib.sh': 'function setup() { echo "setup"; }',
+    })
+    const records = await scanUnitImports(root, ['scripts/deploy.sh', 'scripts/lib.sh'])
+    expect(records).toEqual([{ fromPath: 'scripts/deploy.sh', toPath: 'scripts/lib.sh', confidence: 1 }])
+  })
+
+  test('resolves . ./path.sh imports (POSIX dot operator)', async () => {
+    const root = makeRepo({
+      'scripts/main.sh': '. ./utils.sh\necho "main"',
+      'scripts/utils.sh': 'UTIL_VAR=1',
+    })
+    const records = await scanUnitImports(root, ['scripts/main.sh', 'scripts/utils.sh'])
+    expect(records).toEqual([{ fromPath: 'scripts/main.sh', toPath: 'scripts/utils.sh', confidence: 1 }])
+  })
+
+  test('ignores commented-out source lines', async () => {
+    const root = makeRepo({
+      'scripts/a.sh': '# source ./b.sh\necho "a"',
+      'scripts/b.sh': 'echo "b"',
+    })
+    const records = await scanUnitImports(root, ['scripts/a.sh', 'scripts/b.sh'])
+    expect(records).toHaveLength(0)
+  })
+
+  test('ignores bare-name sources that are not repo-relative paths', async () => {
+    const root = makeRepo({
+      'scripts/a.sh': 'source somelib\necho "a"',
+      'scripts/b.sh': 'echo "b"',
+    })
+    const records = await scanUnitImports(root, ['scripts/a.sh', 'scripts/b.sh'])
+    expect(records).toHaveLength(0)
+  })
+
+  test('resolves indented source inside if-block', async () => {
+    const root = makeRepo({
+      'scripts/a.sh': 'if true; then\n  source ./b.sh\nfi',
+      'scripts/b.sh': 'echo "b"',
+    })
+    const records = await scanUnitImports(root, ['scripts/a.sh', 'scripts/b.sh'])
+    expect(records).toEqual([{ fromPath: 'scripts/a.sh', toPath: 'scripts/b.sh', confidence: 1 }])
+  })
+})
