@@ -335,3 +335,38 @@ languages:
           - symbols
         priority: 10
         notes: Built-in fallback symbol extraction for C++ when clangd is unavailable.
+
+  # code-spider-e32
+  - id: shell
+    display_name: Shell
+    aliases:
+      - bash
+      - sh
+      - zsh
+    detect:
+      extensions:
+        - .sh
+        - .bash
+        - .zsh
+    analyzers:
+      - id: bash-language-server
+        kind: lsp
+        tool: bash-language-server
+        command:
+          - bash-language-server
+          - start
+        capabilities:
+          - symbols
+          - defs
+          - refs
+          - diagnostics
+        priority: 100
+      - id: shell-basic-heuristic
+        kind: heuristic
+        tool: builtin
+        command:
+          - heuristic-symbols
+        capabilities:
+          - symbols
+        priority: 10
+        notes: Built-in fallback symbol extraction for Shell scripts when bash-language-server is unavailable.

@@ -43,6 +43,8 @@ function extract(source: string, patterns: NamePattern[], blacklist?: Set<string
 // callers are unaffected.
 export function heuristicSymbols(source: string, language?: string): LspSymbol[] {
   if (language === 'c' || language === 'cpp') return cppSymbols(source)
+  // code-spider-e32
+  if (language === 'shell') return shellSymbols(source)
   return genericSymbols(source)
 }
 
@@ -67,6 +69,22 @@ function cppSymbols(source: string): LspSymbol[] {
     { re: /^([A-Za-z_][\w\s*]*?)\s+\*?(\w+)\s*\([^;{]*\)\s*\{/gm, kind: 12, kindName: 'Function', group: 2 },
   ]
   return extract(source, patterns, CPP_FUNCTION_BLACKLIST)
+}
+
+// code-spider-e32
+const SHELL_FUNCTION_BLACKLIST = new Set([
+  'if', 'for', 'while', 'until', 'case', 'select',
+  'return', 'do', 'done', 'fi', 'esac', 'then', 'else',
+])
+
+function shellSymbols(source: string): LspSymbol[] {
+  const patterns: NamePattern[] = [
+    // bash keyword style: "function foo" / "function foo()" / "function foo {"
+    { re: /^function\s+(\w+)/gm, kind: 12, kindName: 'Function' },
+    // POSIX style: "foo()" at line start with optional whitespace before/after parens
+    { re: /^\s*(\w+)\s*\(\s*\)/gm, kind: 12, kindName: 'Function' },
+  ]
+  return extract(source, patterns, SHELL_FUNCTION_BLACKLIST)
 }
 
 function genericSymbols(source: string): LspSymbol[] {

@@ -83,6 +83,7 @@ describe('analyzer registry loader', () => {
       'zig',
       'c',
       'cpp',
+      'shell',
     ])
     expect(
       registry.languages.find(language => language.id === 'zig')?.analyzers.map(analyzer => analyzer.id)
