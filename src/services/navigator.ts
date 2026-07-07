@@ -71,6 +71,12 @@ function nodeSelect(prefix = ''): string {
 
 const NODE_SELECT = nodeSelect()
 
+// code-spider-ag4
+export interface SemanticRunResolution {
+  runId: number | null
+  fallbackFrom: number | null
+}
+
 export class Navigator {
   constructor(private db: Database, private runId: number) {}
 
@@ -79,6 +85,28 @@ export class Navigator {
       'SELECT id FROM runs WHERE repo_root=? AND completed_at IS NOT NULL ORDER BY id DESC LIMIT 1'
     ).get(repoRoot)
     return row?.id ?? null
+  }
+
+  // code-spider-ag4
+  // A follow-up run without --semantic (e.g. index --embed --incremental)
+  // becomes the latest run with zero symbols; semantic readers fall back to
+  // the newest run that has symbols instead of going silently empty.
+  // fallbackFrom carries the skipped latest run id so callers can say so.
+  static resolveSemanticRunId(db: Database, repoRoot: string): SemanticRunResolution {
+    const latest = Navigator.latestRunId(db, repoRoot)
+    if (latest === null) return { runId: null, fallbackFrom: null }
+    const latestHasSymbols = db.query<{ one: number }, number>(
+      'SELECT 1 AS one FROM symbols WHERE run_id=? LIMIT 1'
+    ).get(latest)
+    if (latestHasSymbols) return { runId: latest, fallbackFrom: null }
+    const newestWithSymbols = db.query<{ id: number }, string>(
+      `SELECT r.id FROM runs r
+       WHERE r.repo_root=? AND r.completed_at IS NOT NULL
+         AND EXISTS (SELECT 1 FROM symbols s WHERE s.run_id=r.id)
+       ORDER BY r.id DESC LIMIT 1`
+    ).get(repoRoot)
+    if (newestWithSymbols) return { runId: newestWithSymbols.id, fallbackFrom: latest }
+    return { runId: latest, fallbackFrom: null }
   }
 
   // code-spider-47p

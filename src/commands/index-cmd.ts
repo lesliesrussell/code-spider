@@ -1,6 +1,9 @@
 import type { CliContext } from '../types'
 import { Indexer } from '../services/indexer'
 import { SemanticEnricher } from '../services/semantic-enricher'
+// code-spider-ag4
+import { Navigator } from '../services/navigator'
+import { openDb } from '../db/init'
 // code-spider-403
 import { EmbeddingService } from '../services/embeddings'
 import { resolve } from 'node:path'
@@ -69,6 +72,12 @@ export default async function run(ctx: CliContext): Promise<void> {
     enrichment = enrichResult
   } else if (!ctx.json) {
     console.log(`✓ Run #${result.runId}: ${result.fileCount} files, ${result.zoneCount} zones (${result.durationMs}ms)`)
+    // code-spider-ag4
+    const db = openDb(dbPath)
+    const { runId: semanticRunId, fallbackFrom } = Navigator.resolveSemanticRunId(db, targetPath)
+    if (fallbackFrom === result.runId && semanticRunId !== null) {
+      console.log(`  Note: this run has no semantic data; atoms/defs/refs will fall back to run #${semanticRunId}. Add --semantic to refresh.`)
+    }
   }
 
   // code-spider-403

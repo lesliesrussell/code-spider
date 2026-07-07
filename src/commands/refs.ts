@@ -31,10 +31,14 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   const db = openDb(ctx.dbPath)
-  const runId = Navigator.latestRunId(db, ctx.repoRoot)
+  // code-spider-ag4
+  const { runId, fallbackFrom } = Navigator.resolveSemanticRunId(db, ctx.repoRoot)
   if (runId === null) {
     console.error('No index found. Run: code-spider index')
     process.exit(1)
+  }
+  if (fallbackFrom !== null) {
+    console.error(`Note: latest run #${fallbackFrom} has no semantic data; using run #${runId}. Refresh with: code-spider index --semantic`)
   }
 
   const query = new SemanticQueryService(db, runId)

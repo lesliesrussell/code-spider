@@ -80,4 +80,58 @@ describe('atoms command', () => {
     expect(capture.lines.some(line => line.includes('Exporter') && !line.includes('[low-signal]'))).toBe(true)
     expect(capture.lines.some(line => line.includes('map() callback') && line.includes('[low-signal]'))).toBe(true)
   })
+
+  // code-spider-ag4
+  test('falls back to prior run with symbols when latest run has none', async () => {
+    const repoRoot = makeTempRepo('code-spider-atoms-fallback')
+    mkdirSync(join(repoRoot, '.code-spider'), { recursive: true })
+    const dbPath = join(repoRoot, '.code-spider', 'index.db')
+    const db = openDb(dbPath)
+
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (1,?,?,?,?,?)'
+    ).run('2026-07-07T12:00:00Z', '2026-07-07T12:01:00Z', repoRoot, 'abc1234', 'test')
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES (1, 1, 'unit', 'unit:src/example.ts', 'example.ts', 'src/example.ts', 'TypeScript', 0, 1)`
+    ).run()
+    db.query(
+      `INSERT INTO symbols (id, run_id, node_id, symbol_key, name, kind, range_json, selection_range_json)
+       VALUES (1, 1, 1, 'src/example.ts:Exporter', 'Exporter', 'Class', ?, ?)`
+    ).run(
+      JSON.stringify({ start: { line: 0, character: 0 }, end: { line: 2, character: 1 } }),
+      JSON.stringify({ start: { line: 0, character: 13 }, end: { line: 0, character: 21 } }),
+    )
+    // Later run (e.g. index --embed --incremental) with no semantic enrichment.
+    db.query(
+      'INSERT INTO runs (id, started_at, completed_at, repo_root, repo_commit, tool_version) VALUES (2,?,?,?,?,?)'
+    ).run('2026-07-07T13:00:00Z', '2026-07-07T13:01:00Z', repoRoot, 'abc1234', 'test')
+    db.query(
+      `INSERT INTO nodes (id, run_id, kind, key, label, path, language, score, confidence)
+       VALUES (2, 2, 'unit', 'unit:src/example.ts', 'example.ts', 'src/example.ts', 'TypeScript', 0, 1)`
+    ).run()
+
+    const errors: string[] = []
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(arg => String(arg)).join(' '))
+    }
+    const capture = captureLogs()
+    try {
+      const ctx: CliContext = {
+        repoRoot,
+        dbPath,
+        json: false,
+        args: ['unit:src/example.ts'],
+        flags: {},
+      }
+      await runAtoms(ctx)
+    } finally {
+      capture.restore()
+      console.error = originalError
+    }
+
+    expect(capture.lines.some(line => line.includes('Exporter'))).toBe(true)
+    expect(errors.some(line => line.includes('run #2') && line.includes('run #1'))).toBe(true)
+  })
 })
