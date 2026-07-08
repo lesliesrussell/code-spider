@@ -137,15 +137,19 @@ export const SCHEMA: string[] = [
   PRIMARY KEY (investigation_id, evidence_id)
 )`,
   // code-spider-403
-  // Semantic embeddings: one vector per unit node per run, model-tagged so a
+  // Semantic embeddings: vectors per unit node per run, model-tagged so a
   // model swap invalidates cleanly. Vector is a Float32Array blob.
+  // code-spider-5ns: chunk_key NULL = whole-file vector; 'name@line' = one
+  // top-level symbol's chunk. Text (not a symbol_id FK) so carry-forward can
+  // copy rows across runs where symbol ids differ.
   `CREATE TABLE IF NOT EXISTS embeddings (
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES runs(id),
   node_id INTEGER NOT NULL REFERENCES nodes(id),
   model TEXT NOT NULL,
   dims INTEGER NOT NULL,
-  vector BLOB NOT NULL
+  vector BLOB NOT NULL,
+  chunk_key TEXT
 )`,
   // code-spider-xbf
   // Indexes for the hot query paths. Without these every navigator, flow,

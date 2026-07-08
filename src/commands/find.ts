@@ -57,6 +57,8 @@ export default async function run(ctx: CliContext): Promise<void> {
     return
   }
   for (const match of matches) {
-    console.log(`  ${match.score.toFixed(3)}  ${match.key.padEnd(50)}  ${match.path ?? match.label}`)
+    // code-spider-5ns: name the symbol whose chunk won, when it wasn't the file vector
+    const chunk = match.chunk !== null ? `  · ${match.chunk}` : ''
+    console.log(`  ${match.score.toFixed(3)}  ${match.key.padEnd(50)}  ${match.path ?? match.label}${chunk}`)
   }
 }

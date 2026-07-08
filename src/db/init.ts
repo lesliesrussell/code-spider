@@ -50,6 +50,11 @@ function migrateExistingTables(db: Database): void {
   if (!runsCols.some(c => c.name === 'corpus_ingested_tokens')) {
     db.query('ALTER TABLE runs ADD COLUMN corpus_ingested_tokens INTEGER').run()
   }
+  // code-spider-5ns
+  const embeddingCols = db.query('PRAGMA table_info(embeddings)').all() as Array<{ name: string }>
+  if (!embeddingCols.some(c => c.name === 'chunk_key')) {
+    db.query('ALTER TABLE embeddings ADD COLUMN chunk_key TEXT').run()
+  }
 }
 
 export function openDb(dbPath: string): Database {

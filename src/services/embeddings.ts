@@ -5,10 +5,12 @@
 // are carried forward for unchanged files exactly like incremental enrichment
 // (stat fingerprint in node metadata) — steady-state cost is changed files.
 //
-// Known limitation: one vector per file. Long files are represented by their
-// sampled text, so functionality buried mid-file may rank poorly for queries
-// targeting it specifically. The fix, if it ever matters enough, is chunked
-// multi-vector embedding (N vectors per file, max-pool the similarity).
+// code-spider-5ns: chunked multi-vector embedding. Besides the whole-file
+// vector, each unit gets one vector per substantial top-level symbol
+// (chunk_key = 'name@line'); ranking max-pools similarity across a node's
+// vectors so code buried mid-file ranks on its own text. Chunks require
+// symbols (index --semantic --embed); without them units degrade to the
+// single file vector.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
@@ -19,6 +21,12 @@ import { debugLog } from '../utils/debug'
 const FILE_HEAD_CHARS = 2000
 const FILE_TAIL_CHARS = 1000
 const MAX_SYMBOL_NAMES = 80
+// code-spider-5ns: chunk selection bounds. Only symbols big enough to have
+// their own topic get a vector, capped per file to bound embed cost.
+const MIN_CHUNK_LINES = 10
+const MAX_CHUNKS_PER_FILE = 8
+const CHUNK_TEXT_CHARS = 2000
+const CHUNK_KINDS = new Set(['Function', 'Method', 'Class', 'Interface', 'Constant', 'Variable'])
 
 export interface EmbedRunOptions {
   repoRoot: string
@@ -39,6 +47,9 @@ export interface SemanticMatch {
   label: string
   path: string | null
   score: number
+  // code-spider-5ns: symbol whose chunk produced the winning score; null
+  // when the whole-file vector won.
+  chunk: string | null
 }
 
 interface UnitRow {
@@ -106,6 +117,53 @@ export class EmbeddingService {
     return 'search_document: ' + parts.filter(part => part !== '').join('\n')
   }
 
+  // code-spider-5ns
+  // Substantial top-level symbols get their own chunk vector. chunk_key is
+  // name@startLine — stable enough for display, and run-independent so
+  // carry-forward copies chunk rows verbatim.
+  private chunkCandidates(db: Database, runId: number, unit: UnitRow, repoRoot: string): Array<{ chunkKey: string; text: string }> {
+    const rows = db.query<{ name: string; kind: string; range_json: string | null }, [number, number]>(
+      `SELECT name, kind, range_json FROM symbols
+       WHERE run_id=? AND node_id=? AND container_name IS NULL`
+    ).all(runId, unit.id)
+    if (rows.length === 0) return []
+
+    let lines: string[]
+    try {
+      lines = readFileSync(join(repoRoot, unit.path), 'utf8').split('\n')
+    } catch (err) {
+      debugLog('embeddings', `failed to read ${unit.path} for chunks`, err)
+      return []
+    }
+
+    const candidates: Array<{ chunkKey: string; text: string; span: number }> = []
+    for (const row of rows) {
+      if (!CHUNK_KINDS.has(row.kind)) continue
+      if (row.range_json === null) continue
+      let range: { start?: { line?: number }; end?: { line?: number } }
+      try {
+        range = JSON.parse(row.range_json) as typeof range
+      } catch {
+        continue
+      }
+      const start = range.start?.line
+      const end = range.end?.line
+      if (start === undefined || end === undefined) continue
+      const span = end - start + 1
+      if (span < MIN_CHUNK_LINES) continue
+      const source = lines.slice(start, end + 1).join('\n').slice(0, CHUNK_TEXT_CHARS)
+      candidates.push({
+        chunkKey: `${row.name}@${start}`,
+        text: `search_document: path: ${unit.path}\nsymbol: ${row.name} (${row.kind})\n${source}`,
+        span,
+      })
+    }
+    return candidates
+      .sort((a, b) => b.span - a.span)
+      .slice(0, MAX_CHUNKS_PER_FILE)
+      .map(({ chunkKey, text }) => ({ chunkKey, text }))
+  }
+
   async embedRun(opts: EmbedRunOptions): Promise<EmbedRunResult> {
     const db = openDb(opts.dbPath)
     const units = db.query<UnitRow, [number]>(
@@ -128,11 +186,12 @@ export class EmbeddingService {
     }
 
     const insert = db.prepare(
-      `INSERT INTO embeddings (run_id, node_id, model, dims, vector) VALUES (?,?,?,?,?)`
+      `INSERT INTO embeddings (run_id, node_id, model, dims, vector, chunk_key) VALUES (?,?,?,?,?,?)`
     )
+    // code-spider-5ns: carry the whole vector family (file + chunks).
     const copy = db.prepare(
-      `INSERT INTO embeddings (run_id, node_id, model, dims, vector)
-       SELECT ?, ?, model, dims, vector FROM embeddings WHERE node_id=? AND model=? LIMIT 1`
+      `INSERT INTO embeddings (run_id, node_id, model, dims, vector, chunk_key)
+       SELECT ?, ?, model, dims, vector, chunk_key FROM embeddings WHERE node_id=? AND model=?`
     )
 
     let filesEmbedded = 0
@@ -160,7 +219,13 @@ export class EmbeddingService {
         filesFailed++
         continue
       }
-      insert.run(opts.runId, unit.id, EMBEDDING_MODEL, vector.length, vectorToBlob(vector))
+      insert.run(opts.runId, unit.id, EMBEDDING_MODEL, vector.length, vectorToBlob(vector), null)
+      // code-spider-5ns
+      for (const chunk of this.chunkCandidates(db, opts.runId, unit, opts.repoRoot)) {
+        const chunkVector = await this.embedder.embed(chunk.text)
+        if (chunkVector === null) continue
+        insert.run(opts.runId, unit.id, EMBEDDING_MODEL, chunkVector.length, vectorToBlob(chunkVector), chunk.chunkKey)
+      }
       filesEmbedded++
     }
 
@@ -180,7 +245,7 @@ export class EmbeddingService {
   // Rank units against an existing unit's vector (semantic neighbors).
   neighbors(db: Database, runId: number, nodeId: number, limit = 10): SemanticMatch[] {
     const row = db.query<{ vector: Uint8Array }, [number, number]>(
-      `SELECT vector FROM embeddings WHERE run_id=? AND node_id=? LIMIT 1`
+      `SELECT vector FROM embeddings WHERE run_id=? AND node_id=? AND chunk_key IS NULL LIMIT 1`
     ).get(runId, nodeId)
     if (row === null || row === undefined) return []
     return this.rank(db, runId, blobToVector(row.vector), limit + 1)
@@ -195,21 +260,32 @@ export class EmbeddingService {
     return (row?.count ?? 0) > 0
   }
 
+  // code-spider-5ns: max-pool across each node's vector family (whole-file
+  // + per-symbol chunks); the winning chunk is surfaced for display.
   private rank(db: Database, runId: number, queryVector: Float32Array, limit: number): SemanticMatch[] {
-    const rows = db.query<{ node_id: number; vector: Uint8Array; key: string; label: string; path: string | null }, [number]>(
-      `SELECT e.node_id, e.vector, n.key, n.label, n.path
+    const rows = db.query<{ node_id: number; vector: Uint8Array; chunk_key: string | null; key: string; label: string; path: string | null }, [number]>(
+      `SELECT e.node_id, e.vector, e.chunk_key, n.key, n.label, n.path
        FROM embeddings e JOIN nodes n ON n.id = e.node_id
        WHERE e.run_id=?`
     ).all(runId)
 
-    return rows
-      .map(row => ({
+    const best = new Map<number, SemanticMatch>()
+    for (const row of rows) {
+      const score = cosineSimilarity(queryVector, blobToVector(row.vector))
+      const current = best.get(row.node_id)
+      if (current !== undefined && current.score >= score) continue
+      const chunkName = row.chunk_key !== null ? row.chunk_key.slice(0, row.chunk_key.lastIndexOf('@')) : null
+      best.set(row.node_id, {
         nodeId: row.node_id,
         key: row.key,
         label: row.label,
         path: row.path,
-        score: cosineSimilarity(queryVector, blobToVector(row.vector)),
-      }))
+        score,
+        chunk: chunkName,
+      })
+    }
+
+    return [...best.values()]
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
   }
