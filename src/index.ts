@@ -37,7 +37,7 @@ Commands:
   find "<query>" [--limit <n>]         Semantic search over embedded units
   refs <symbol> [--indexed-only]       Find references (--indexed-only: no LSP, symbol-edge granularity)
   prune [--keep <n>] [--dry-run]       Delete stale runs, reclaim db space (default keep: 3)
-  mcp                                  Run as an MCP stdio server (tools: overview, show, find, refs, ...)
+  mcp [install]                        Run as an MCP stdio server; install writes project .mcp.json
   defs <symbol> [--indexed-only]       Find definitions (--indexed-only: no LSP)
   atoms <unit-ref>                     List atoms in a unit
   investigate                          List investigations
