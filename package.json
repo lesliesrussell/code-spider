@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Repository indexing and analysis CLI",
   "module": "src/index.ts",
-  "bin": { "code-spider": "src/index.ts" },
+  "bin": {
+    "code-spider": "src/index.ts"
+  },
   "type": "module",
   "private": false,
   "license": "MIT",
@@ -29,5 +31,8 @@
     "build": "bun build src/index.ts --compile --outfile dist/code-spider",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }
