@@ -47,7 +47,61 @@ export abstract class BaseRegistryPlugin implements LanguagePlugin {
 
   abstract detect(repoRoot: string, filePath: string): PluginDetectionResult
   abstract health(repoRoot: string): PluginHealth
-  abstract capabilityStatus(repoRoot: string): Record<'symbols' | 'definitions' | 'references' | 'diagnostics' | 'health', PluginCapabilityStatus>
+
+  // code-spider-y9e
+  // Every built-in plugin computed capabilityStatus the same way — enumerate
+  // owned languages (matchesLanguage already encodes each plugin's filter),
+  // collect candidates, report supported/available per capability.
+  capabilityStatus(repoRoot: string): Record<'symbols' | 'definitions' | 'references' | 'diagnostics' | 'health', PluginCapabilityStatus> {
+    const supports = (capability: PluginCapability): PluginCapabilityStatus => {
+      const candidates = this.collectCandidates(repoRoot, [capability])
+      const available = candidates.some(candidate =>
+        candidate.analyzer.kind === 'heuristic' || this.commandExists(candidate.analyzer.command[0] ?? ''),
+      )
+      return { supported: candidates.length > 0, available }
+    }
+
+    return {
+      symbols: supports('symbols'),
+      definitions: supports('definitions'),
+      references: supports('references'),
+      diagnostics: supports('diagnostics'),
+      health: { supported: true, available: true },
+    }
+  }
+
+  // code-spider-y9e
+  // Candidates across every owned language for the given capabilities; the
+  // shared enumeration under capabilityStatus/health/detect.
+  protected collectCandidates(repoRoot: string, capabilities: PluginCapability[]): ResolvedAnalyzer[] {
+    return this.registry.languages
+      .filter(language => this.matchesLanguage(language))
+      .flatMap(language => capabilities.flatMap(capability =>
+        this.getCandidates(repoRoot, language.id, capability),
+      ))
+  }
+
+  // code-spider-y9e
+  // The common detect shape: match the file to an owned registry language,
+  // then grade confidence by whether any analyzer candidates exist.
+  protected registryDetect(
+    repoRoot: string,
+    filePath: string,
+    capabilities: PluginCapability[],
+    confidence: { withCandidates: number; without: number } = { withCandidates: 0.9, without: 0.6 },
+  ): PluginDetectionResult {
+    const language = this.findLanguageFromPath(filePath)
+    if (language === undefined) return { supported: false, confidence: 0 }
+    const candidates = capabilities.flatMap(capability =>
+      this.getCandidates(repoRoot, language.id, capability),
+    )
+    return {
+      supported: true,
+      confidence: candidates.length > 0 ? confidence.withCandidates : confidence.without,
+      languageId: language.id,
+      reason: candidates.length > 0 ? undefined : 'no configured analyzers matched',
+    }
+  }
 
   // Restricts the registry languages this plugin owns. The legacy plugin
   // excludes languages claimed by specific plugins; the specific plugins

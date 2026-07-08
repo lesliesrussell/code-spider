@@ -1,11 +1,10 @@
 import type { RegistryLanguage } from '../analyzer-registry'
 import type {
-  PluginCapabilityStatus,
   PluginDetectionResult,
   PluginHealth,
 } from '../language-plugin'
 // code-spider-9jk
-import { BaseRegistryPlugin, type PluginCapability } from './base-plugin'
+import { BaseRegistryPlugin } from './base-plugin'
 
 type SupportedLanguageId = 'typescript' | 'javascript'
 
@@ -26,42 +25,18 @@ export class TypeScriptJavaScriptPlugin extends BaseRegistryPlugin {
   }
 
   detect(repoRoot: string, filePath: string): PluginDetectionResult {
-    const language = this.findLanguageFromPath(filePath)
-    if (language === undefined) return { supported: false, confidence: 0 }
-    const candidates = this.getCandidates(repoRoot, language.id, 'symbols')
-    return {
-      supported: true,
-      confidence: candidates.length > 0 ? 0.9 : 0.6,
-      languageId: language.id,
-      reason: candidates.length > 0 ? undefined : 'no configured analyzers matched',
-    }
+    // code-spider-y9e
+    return this.registryDetect(repoRoot, filePath, ['symbols'])
   }
 
   health(repoRoot: string): PluginHealth {
-    const candidates = this.languageIds.flatMap(languageId => this.getCandidates(repoRoot, languageId, 'symbols'))
+    // code-spider-y9e
+    const candidates = this.collectCandidates(repoRoot, ['symbols'])
     const available = candidates.some(candidate => this.commandExists(candidate.analyzer.command[0] ?? ''))
     return {
       available,
       toolName: 'typescript-language-server',
       details: available ? undefined : 'No TypeScript/JavaScript semantic provider available',
-    }
-  }
-
-  capabilityStatus(repoRoot: string): Record<'symbols' | 'definitions' | 'references' | 'diagnostics' | 'health', PluginCapabilityStatus> {
-    const supports = (capability: PluginCapability): PluginCapabilityStatus => {
-      const candidates = this.languageIds.flatMap(languageId => this.getCandidates(repoRoot, languageId, capability))
-      const available = candidates.some(candidate =>
-        candidate.analyzer.kind === 'heuristic' || this.commandExists(candidate.analyzer.command[0] ?? ''),
-      )
-      return { supported: candidates.length > 0, available }
-    }
-
-    return {
-      symbols: supports('symbols'),
-      definitions: supports('definitions'),
-      references: supports('references'),
-      diagnostics: supports('diagnostics'),
-      health: { supported: true, available: true },
     }
   }
 }

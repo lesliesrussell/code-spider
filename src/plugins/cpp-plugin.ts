@@ -2,12 +2,11 @@
 import { spawnSync } from 'node:child_process'
 import type { RegistryAnalyzer, RegistryLanguage } from '../analyzer-registry'
 import type {
-  PluginCapabilityStatus,
   PluginDetectionResult,
   PluginDiagnostic,
   PluginHealth,
 } from '../language-plugin'
-import { BaseRegistryPlugin, type PluginCapability } from './base-plugin'
+import { BaseRegistryPlugin } from './base-plugin'
 // code-spider-ua1
 import { buildClangTidyArgs, buildCppcheckArgs, findCompileDb, parseToolOutput } from './shared/cpp-quality'
 
@@ -64,19 +63,13 @@ export class CppPlugin extends BaseRegistryPlugin {
   }
 
   detect(repoRoot: string, filePath: string): PluginDetectionResult {
-    const language = this.findLanguageFromPath(filePath)
-    if (language === undefined) return { supported: false, confidence: 0 }
-    const candidates = this.getCandidates(repoRoot, language.id, 'symbols')
-    return {
-      supported: true,
-      confidence: candidates.length > 0 ? 0.9 : 0.6,
-      languageId: language.id,
-      reason: candidates.length > 0 ? undefined : 'no configured analyzers matched',
-    }
+    // code-spider-y9e
+    return this.registryDetect(repoRoot, filePath, ['symbols'])
   }
 
   health(repoRoot: string): PluginHealth {
-    const candidates = this.languageIds.flatMap(languageId => this.getCandidates(repoRoot, languageId, 'symbols'))
+    // code-spider-y9e
+    const candidates = this.collectCandidates(repoRoot, ['symbols'])
     const available = candidates.some(candidate =>
       candidate.analyzer.kind !== 'heuristic' && this.commandExists(candidate.analyzer.command[0] ?? ''),
     )
@@ -84,24 +77,6 @@ export class CppPlugin extends BaseRegistryPlugin {
       available,
       toolName: 'clangd',
       details: available ? undefined : 'No C/C++ semantic provider available (clangd not found)',
-    }
-  }
-
-  capabilityStatus(repoRoot: string): Record<'symbols' | 'definitions' | 'references' | 'diagnostics' | 'health', PluginCapabilityStatus> {
-    const supports = (capability: PluginCapability): PluginCapabilityStatus => {
-      const candidates = this.languageIds.flatMap(languageId => this.getCandidates(repoRoot, languageId, capability))
-      const available = candidates.some(candidate =>
-        candidate.analyzer.kind === 'heuristic' || this.commandExists(candidate.analyzer.command[0] ?? ''),
-      )
-      return { supported: candidates.length > 0, available }
-    }
-
-    return {
-      symbols: supports('symbols'),
-      definitions: supports('definitions'),
-      references: supports('references'),
-      diagnostics: supports('diagnostics'),
-      health: { supported: true, available: true },
     }
   }
 }
