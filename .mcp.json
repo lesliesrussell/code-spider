@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "code-spider": {
+      "command": "code-spider",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
