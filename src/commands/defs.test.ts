@@ -96,6 +96,39 @@ describe('defs command', () => {
     }
   })
 
+  // code-spider-bl7
+  test('--indexed-only skips LSP and returns indexed matches undegraded', async () => {
+    const repoRoot = makeTempRepo('code-spider-defs-indexed-only')
+    const dbPath = seedDefsDb(repoRoot)
+    const capture = captureLogs()
+    const originalExecuteDefinitions = AnalyzerRunner.prototype.executeDefinitions
+    let lspCalled = false
+    AnalyzerRunner.prototype.executeDefinitions = async () => {
+      lspCalled = true
+      return { analyzerId: 1, locations: [] }
+    }
+
+    try {
+      const ctx: CliContext = {
+        repoRoot,
+        dbPath,
+        json: true,
+        args: ['ExampleService'],
+        flags: { 'indexed-only': true },
+      }
+      await runDefs(ctx)
+      const payload = JSON.parse(capture.lines.join('\n'))
+      expect(lspCalled).toBe(false)
+      expect(payload.mode).toBe('indexed-symbols')
+      expect(payload.degraded).toBe(false)
+      expect(payload.matches.length).toBe(1)
+      expect(payload.matches[0].path).toBe('src/index.ts')
+    } finally {
+      AnalyzerRunner.prototype.executeDefinitions = originalExecuteDefinitions
+      capture.restore()
+    }
+  })
+
   test('uses semantic definitions when available', async () => {
     const repoRoot = makeTempRepo('code-spider-defs-text')
     const dbPath = seedDefsDb(repoRoot)

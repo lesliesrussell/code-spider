@@ -180,6 +180,36 @@ export class SemanticQueryService {
     })
   }
 
+  // code-spider-bl7
+  // References persisted as symbol_edges at index time: the enclosing symbol
+  // of each use site, anchored at that symbol's selection range. Coarser than
+  // live LSP (symbol-level, not use-site-level) but instant and offline.
+  findEdgeReferences(symbolIds: number[]): ReferenceMatch[] {
+    if (symbolIds.length === 0) return []
+    const placeholders = symbolIds.map(() => '?').join(',')
+    const rows = this.db.query<{ path: string | null; range_json: string | null; selection_range_json: string | null }, [number, ...number[]]>(
+      `SELECT n.path, s.range_json, s.selection_range_json
+       FROM symbol_edges e
+       JOIN symbols s ON s.id = e.from_symbol_id
+       JOIN nodes n ON n.id = s.node_id
+       WHERE e.run_id = ?
+         AND e.to_symbol_id IN (${placeholders})
+       ORDER BY n.path ASC`
+    ).all(this.runId, ...symbolIds)
+
+    return rows.flatMap(row => {
+      if (row.path === null) return []
+      const range = parseRange(row.selection_range_json) ?? parseRange(row.range_json)
+      return [{
+        path: row.path,
+        line: range?.start?.line ?? null,
+        column: range?.start?.character ?? null,
+        endLine: range?.end?.line ?? null,
+        endColumn: range?.end?.character ?? null,
+      }]
+    })
+  }
+
   findIndexedReferences(symbolQuery: string): ReferenceMatch[] {
     const rows = this.db.query<{ path: string | null; range_json: string | null }, [number, string]>(
       `SELECT n.path, s.range_json

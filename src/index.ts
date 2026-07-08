@@ -35,8 +35,8 @@ Commands:
                                        List related nodes, optionally by one signal
   flows [<node-ref>] [--limit <n>]     List detected flows
   find "<query>" [--limit <n>]         Semantic search over embedded units
-  refs <symbol>                        Find references
-  defs <symbol>                        Find definitions
+  refs <symbol> [--indexed-only]       Find references (--indexed-only: no LSP, symbol-edge granularity)
+  defs <symbol> [--indexed-only]       Find definitions (--indexed-only: no LSP)
   atoms <unit-ref>                     List atoms in a unit
   investigate                          List investigations
   investigate start "<question>"       Start an investigation

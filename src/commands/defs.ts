@@ -48,11 +48,13 @@ export default async function run(ctx: CliContext): Promise<void> {
   const definitions = query.findReferenceSeedDefinitions(symbol)
   // code-spider-ab9
   recordIngestedNodes(db, runId, [...indexedMatches.map(m => m.nodeKey), ...definitions.map(d => d.nodeKey)])
+  // code-spider-bl7
+  const indexedOnly = ctx.flags['indexed-only'] === true
   const runner = new AnalyzerRunner()
   const semanticMatches: DefinitionOutput['matches'] = []
   const errors: string[] = []
 
-  for (const definition of definitions) {
+  for (const definition of indexedOnly ? [] : definitions) {
     if (definition.path === null || definition.anchorLine === null || definition.anchorColumn === null) {
       continue
     }
@@ -105,7 +107,8 @@ export default async function run(ctx: CliContext): Promise<void> {
         heuristic: match.heuristic,
       }))
   const mode = dedupedSemantic.length > 0 ? 'semantic-definitions' : 'indexed-symbols'
-  const degraded = mode !== 'semantic-definitions'
+  // code-spider-bl7: indexed results were requested, not fallen back to
+  const degraded = mode !== 'semantic-definitions' && !indexedOnly
   const degradationReason = degraded
     ? errors.length > 0
       ? `Fell back to indexed symbol definitions after semantic definitions returned no locations (${errors.join('; ')})`
@@ -133,6 +136,9 @@ export default async function run(ctx: CliContext): Promise<void> {
   if (degraded) {
     console.log(`Fallback definitions for ${symbol}`)
     console.log(`  ${degradationReason}`)
+  } else if (indexedOnly) {
+    // code-spider-bl7
+    console.log(`Indexed definitions for ${symbol}`)
   } else {
     console.log(`Definitions for ${symbol}`)
   }

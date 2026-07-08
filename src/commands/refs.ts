@@ -9,7 +9,8 @@ import { resolve, relative } from 'node:path'
 
 interface ReferenceOutput {
   symbol: string
-  mode: 'lsp-references' | 'indexed-symbols'
+  // code-spider-bl7: 'indexed-edges' = requested fast path over symbol_edges
+  mode: 'lsp-references' | 'indexed-symbols' | 'indexed-edges'
   definitions: ReturnType<SemanticQueryService['findReferenceSeedDefinitions']>
   references: Array<{
     path: string
@@ -64,6 +65,38 @@ export default async function run(ctx: CliContext): Promise<void> {
 
   // code-spider-ab9
   recordIngestedNodes(db, runId, definitions.map(d => d.nodeKey))
+
+  // code-spider-bl7
+  // --indexed-only reads references persisted as symbol_edges at index time
+  // (enclosing-symbol granularity) instead of spawning live LSP sessions.
+  if (ctx.flags['indexed-only'] === true) {
+    const edgeRefs = query.findEdgeReferences(definitions.map(d => d.symbolId))
+    const references = edgeRefs.length > 0 ? edgeRefs : query.findIndexedReferences(symbol)
+    const response: ReferenceOutput = {
+      symbol,
+      mode: edgeRefs.length > 0 ? 'indexed-edges' : 'indexed-symbols',
+      definitions,
+      references,
+      errors: [],
+      degraded: false,
+    }
+    if (ctx.json) {
+      console.log(JSON.stringify(response, null, 2))
+      return
+    }
+    if (references.length === 0) {
+      console.log(`No indexed references found for ${symbol} (try without --indexed-only, or re-run: code-spider index --semantic)`)
+      return
+    }
+    console.log(`Indexed references for ${symbol}`)
+    console.log()
+    for (const reference of references) {
+      const line = reference.line !== null ? reference.line + 1 : '?'
+      const column = reference.column !== null ? reference.column + 1 : '?'
+      console.log(`  ${reference.path}:${line}:${column}`)
+    }
+    return
+  }
 
   const runner = new AnalyzerRunner()
   const references: Array<{
