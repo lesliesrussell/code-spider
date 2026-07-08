@@ -2,42 +2,20 @@
 // Guard test: read commands must record "ingested" provenance (the token-size
 // of the nodes their answer drew from) into the per-process token ledger.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { getIngested, resetLedger } from '../services/token-ledger'
 import runShow from './show'
+// code-spider-5jl
+import { captureLogs, cleanupTempDirs, makeTempRepo } from '../test-helpers'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-})
+afterEach(cleanupTempDirs)
 
 beforeEach(() => {
   resetLedger()
 })
-
-function makeTempRepo(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `${name}-`))
-  tempDirs.push(dir)
-  return dir
-}
-
-function captureLogs(): { restore: () => void } {
-  const originalLog = console.log
-  console.log = () => {}
-  return {
-    restore: () => {
-      console.log = originalLog
-    },
-  }
-}
 
 describe('read command provenance', () => {
   test('show records ingested tokens for the shown node', async () => {

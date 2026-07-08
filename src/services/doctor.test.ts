@@ -1,24 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { openDb } from '../db/init'
 import { DoctorService } from './doctor'
+// code-spider-5jl
+import { cleanupTempDirs, makeTempRepo } from '../test-helpers'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-function makeTempRepo(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `${name}-`))
-  tempDirs.push(dir)
-  return dir
-}
+afterEach(cleanupTempDirs)
 
 describe('DoctorService plugin reporting', () => {
   test('reports detected languages and selected analyzers from the active plugin path', async () => {

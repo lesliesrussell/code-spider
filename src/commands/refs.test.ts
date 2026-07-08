@@ -1,40 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import { AnalyzerRunner } from '../services/analyzer-runner'
 import runRefs from './refs'
+// code-spider-5jl
+import { captureLogs, cleanupTempDirs, makeTempRepo } from '../test-helpers'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-function makeTempRepo(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `${name}-`))
-  tempDirs.push(dir)
-  return dir
-}
-
-function captureLogs(): { lines: string[]; restore: () => void } {
-  const lines: string[] = []
-  const originalLog = console.log
-  console.log = (...args: unknown[]) => {
-    lines.push(args.map(arg => String(arg)).join(' '))
-  }
-  return {
-    lines,
-    restore: () => {
-      console.log = originalLog
-    },
-  }
-}
+afterEach(cleanupTempDirs)
 
 function seedRefsDb(repoRoot: string): string {
   const dbPath = join(repoRoot, '.code-spider', 'index.db')

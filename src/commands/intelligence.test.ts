@@ -1,38 +1,17 @@
 // code-spider-0ok
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import type { CliContext } from '../types'
 import { openDb } from '../db/init'
 import runIntelligence, { runAnalyzers } from './intelligence'
+// code-spider-5jl
+import { captureLogs, cleanupTempDirs, makeTempRepo } from '../test-helpers'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-function captureLogs(): { lines: string[]; restore: () => void } {
-  const lines: string[] = []
-  const originalLog = console.log
-  console.log = (...args: unknown[]) => {
-    lines.push(args.map(arg => String(arg)).join(' '))
-  }
-  return {
-    lines,
-    restore: () => {
-      console.log = originalLog
-    },
-  }
-}
+afterEach(cleanupTempDirs)
 
 function makeIndexedRepo(name: string): { ctx: CliContext; dbPath: string } {
-  const repoRoot = mkdtempSync(join(tmpdir(), `${name}-`))
-  tempDirs.push(repoRoot)
+  const repoRoot = makeTempRepo(name)
   mkdirSync(join(repoRoot, '.code-spider'), { recursive: true })
   const dbPath = join(repoRoot, '.code-spider', 'index.db')
   const db = openDb(dbPath)

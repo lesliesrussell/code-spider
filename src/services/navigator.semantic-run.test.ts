@@ -1,25 +1,13 @@
 // code-spider-ag4
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { openDb } from '../db/init'
 import { Navigator } from './navigator'
+// code-spider-5jl
+import { cleanupTempDirs, makeTempRepo } from '../test-helpers'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-function makeTempRepo(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `${name}-`))
-  tempDirs.push(dir)
-  return dir
-}
+afterEach(cleanupTempDirs)
 
 function seedRun(db: ReturnType<typeof openDb>, runId: number, repoRoot: string, withSymbols: boolean): void {
   db.query(

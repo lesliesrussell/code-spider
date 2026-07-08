@@ -1,29 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
 import { openDb } from '../db/init'
 import { Exporter } from './exporter'
+// code-spider-5jl
+import { cleanupTempDirs, makeTempRepo } from '../test-helpers'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-function makeTempRepo(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `${name}-`))
-  tempDirs.push(dir)
-  return dir
-}
+afterEach(cleanupTempDirs)
 
 function makeTempDbPath(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `${name}-db-`))
-  tempDirs.push(dir)
+  const dir = makeTempRepo(`${name}-db`)
   return join(dir, 'index.db')
 }
 
