@@ -36,6 +36,7 @@ Commands:
   flows [<node-ref>] [--limit <n>]     List detected flows
   find "<query>" [--limit <n>]         Semantic search over embedded units
   refs <symbol> [--indexed-only]       Find references (--indexed-only: no LSP, symbol-edge granularity)
+  prune [--keep <n>] [--dry-run]       Delete stale runs, reclaim db space (default keep: 3)
   defs <symbol> [--indexed-only]       Find definitions (--indexed-only: no LSP)
   atoms <unit-ref>                     List atoms in a unit
   investigate                          List investigations
@@ -141,6 +142,12 @@ async function main(): Promise<void> {
     // code-spider-403
     case 'find': {
       const mod = await import('./commands/find')
+      await mod.default(ctx)
+      break
+    }
+    // code-spider-ebz
+    case 'prune': {
+      const mod = await import('./commands/prune')
       await mod.default(ctx)
       break
     }

@@ -16,10 +16,14 @@ export default async function run(ctx: CliContext): Promise<void> {
   }
 
   const db = openDb(ctx.dbPath)
-  const runId = Navigator.latestRunId(db, ctx.repoRoot)
+  // code-spider-ebz
+  const { runId, fallbackFrom } = Navigator.resolveRunFor(db, ctx.repoRoot, 'embeddings')
   if (runId === null) {
     console.error('No index found. Run: code-spider index')
     process.exit(1)
+  }
+  if (fallbackFrom !== null) {
+    console.error(`Note: latest run #${fallbackFrom} has no embeddings; using run #${runId}. Refresh with: code-spider index --embed`)
   }
 
   const limitFlag = ctx.flags['limit']
