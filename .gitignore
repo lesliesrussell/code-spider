@@ -41,4 +41,7 @@ Thumbs.db
 .omc/
 .beads/
 .claude/
-.code-spider/
+# code-spider-w04: track config.yaml, ignore the local index cache
+.code-spider/*
+!.code-spider/config.yaml
+!.code-spider/.gitignore

@@ -1,0 +1,15 @@
+ignore:
+  dirs:
+    - .beads
+    - .claude
+    - .nardo
+    - .omc
+  globs:
+    - "*.db"
+    - "*.db-wal"
+    - "*.db-shm"
+    - "*.sqlite"
+    - "*.sqlite3"
+intelligence:
+  entrypoints:
+    - src/index.ts
